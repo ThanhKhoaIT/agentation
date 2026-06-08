@@ -1,0 +1,24 @@
+{
+  "name": "agentation-extension",
+  "version": "1.0.0",
+  "description": "Chrome Extension for Agentation",
+  "private": true,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "dependencies": {
+    "agentation": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0",
+    "esbuild-sass-plugin": "^3.6.0",
+    "sass": "^1.97.2"
+  }
+}

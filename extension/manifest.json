@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Agentation",
+  "version": "1.0.0",
+  "description": "Visual feedback for AI coding agents",
+  "permissions": ["storage", "activeTab"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_title": "Agentation",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "128": "icon.png"
+  }
+}

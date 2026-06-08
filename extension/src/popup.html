@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      body {
+        width: 300px;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      h1 { font-size: 18px; margin-top: 0; }
+      .field { margin-bottom: 12px; }
+      label { display: block; font-size: 12px; margin-bottom: 4px; color: #666; }
+      input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+      button { 
+        width: 100%; 
+        padding: 10px; 
+        background: #0088FF; 
+        color: white; 
+        border: none; 
+        border-radius: 4px; 
+        cursor: pointer;
+        font-weight: bold;
+      }
+      button:hover { background: #0077EE; }
+      .status { font-size: 12px; color: green; margin-top: 8px; display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Agentation Settings</h1>
+    <div style="font-size: 11px; color: #888; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+      <span id="current-domain"></span>
+      <span id="connection-indicator" style="width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block;"></span>
+      <span id="connection-text" style="font-size: 10px; color: #999;">Checking...</span>
+    </div>
+    
+    <div class="field">
+      <label>MCP Server Endpoint (this site)</label>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="endpoint-domain" placeholder="localhost" style="flex: 2;" />
+        <input type="text" id="endpoint-port" placeholder="4747" style="flex: 1;" />
+      </div>
+      <div style="font-size: 10px; color: #999; margin-top: 4px;">Leave blank to use global default</div>
+    </div>
+    
+    <div class="field">
+      <label>
+        <input type="checkbox" id="enabled" style="width: auto;" />
+        Enable on this domain
+      </label>
+    </div>
+
+    <button id="save">Save for this site</button>
+    
+    <hr style="border: 0; border-top: 1px solid #eee; margin: 16px 0;" />
+    
+    <div class="field">
+      <label>Global Default Endpoint</label>
+      <div style="display: flex; gap: 8px;">
+        <input type="text" id="global-endpoint-domain" placeholder="localhost" style="flex: 2;" />
+        <input type="text" id="global-endpoint-port" placeholder="4747" style="flex: 1;" />
+      </div>
+    </div>
+    <button id="save-global" style="background: #666;">Save Global Default</button>
+
+    <div id="status" class="status">Settings saved!</div>
+    <script src="popup.js"></script>
+  </body>
+</html>
