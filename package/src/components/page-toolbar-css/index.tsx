@@ -943,10 +943,13 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       } catch (error) {
         // Network error - continue in local-only mode
         setConnectionStatus("disconnected");
-        console.warn(
-          "[Agentation] Failed to initialize session, using local storage:",
-          error,
-        );
+        // Only log if it's not a standard fetch failure (which happens when local server isn't running)
+        if (process.env.NODE_ENV === "development" || !(error instanceof TypeError)) {
+          console.warn(
+            "[Agentation] Failed to initialize session, using local storage:",
+            error,
+          );
+        }
       }
     };
 

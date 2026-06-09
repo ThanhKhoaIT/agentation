@@ -15,6 +15,28 @@
   }
 }
 
+// Protect popup elements from host page global CSS.
+// The popup is portaled to document.body, so global rules like
+// `textarea { background: white }` leak in. :where() zeroes specificity
+// so our component class styles (0,1,0) always win by source order.
+.popup :where(button, textarea) {
+  background: unset;
+  border: unset;
+  border-radius: unset;
+  padding: unset;
+  margin: unset;
+  color: unset;
+  font-family: unset;
+  font-weight: unset;
+  font-style: unset;
+  line-height: unset;
+  letter-spacing: unset;
+  text-transform: unset;
+  text-decoration: unset;
+  box-shadow: unset;
+  outline: unset;
+}
+
 // =============================================================================
 // Animation Keyframes
 // =============================================================================
@@ -238,7 +260,7 @@
   padding: 0.5rem 0.625rem;
   font-size: 0.8125rem;
   font-family: inherit;
-  background: rgba(255, 255, 255, 0.05);
+  background: #252525;
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
@@ -400,7 +422,7 @@
   }
 
   .textarea {
-    background: rgba(0, 0, 0, 0.03);
+    background: #f3f3f3;
     color: #1a1a1a;
     border-color: rgba(0, 0, 0, 0.12);
 

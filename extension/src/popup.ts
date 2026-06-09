@@ -1,13 +1,12 @@
 document.addEventListener("DOMContentLoaded", async () => {
-  const domainInput = document.getElementById("endpoint-domain") as HTMLInputElement;
-  const portInput = document.getElementById("endpoint-port") as HTMLInputElement;
-  const globalDomainInput = document.getElementById("global-endpoint-domain") as HTMLInputElement;
-  const globalPortInput = document.getElementById("global-endpoint-port") as HTMLInputElement;
+  const customEndpointInput = document.getElementById("custom-endpoint") as HTMLInputElement;
+  const customContainer = document.getElementById("custom-container") as HTMLDivElement;
+  const modeDefault = document.getElementById("mode-default") as HTMLInputElement;
+  const modeCustom = document.getElementById("mode-custom") as HTMLInputElement;
   
   const enabledCheckbox = document.getElementById("enabled") as HTMLInputElement;
   const saveButton = document.getElementById("save");
-  const saveGlobalButton = document.getElementById("save-global");
-  const status = document.getElementById("status");
+  const statusMsg = document.getElementById("status");
   const domainDisplay = document.getElementById("current-domain");
   const connectionIndicator = document.getElementById("connection-indicator");
   const connectionText = document.getElementById("connection-text");
@@ -18,7 +17,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const currentSiteDomain = url.hostname;
 
   if (domainDisplay) {
-    domainDisplay.textContent = `Site: ${currentSiteDomain}`;
+    domainDisplay.textContent = currentSiteDomain;
   }
 
   const DEFAULT_DOMAIN = "localhost";
@@ -52,17 +51,32 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
+  const toggleCustomInput = () => {
+    if (modeCustom.checked) {
+      customContainer.classList.remove("hidden");
+    } else {
+      customContainer.classList.add("hidden");
+    }
+  };
+
+  modeDefault.addEventListener("change", toggleCustomInput);
+  modeCustom.addEventListener("change", toggleCustomInput);
+
   // Load current values
   chrome.storage.local.get(["globalDomain", "globalPort", currentSiteDomain], (result) => {
     const globalDomain = result.globalDomain || DEFAULT_DOMAIN;
     const globalPort = result.globalPort || DEFAULT_PORT;
     
-    globalDomainInput.value = globalDomain;
-    globalPortInput.value = globalPort;
-    
     const siteSettings = result[currentSiteDomain] || {};
-    if (siteSettings.domain) domainInput.value = siteSettings.domain;
-    if (siteSettings.port) portInput.value = siteSettings.port;
+    
+    if (siteSettings.domain && (siteSettings.domain !== DEFAULT_DOMAIN || siteSettings.port !== DEFAULT_PORT)) {
+      modeCustom.checked = true;
+      customEndpointInput.value = `${siteSettings.domain}${siteSettings.port ? ":" + siteSettings.port : ""}`;
+      customContainer.classList.remove("hidden");
+    } else {
+      modeDefault.checked = true;
+      customContainer.classList.add("hidden");
+    }
     
     enabledCheckbox.checked = siteSettings.enabled === true;
 
@@ -73,29 +87,37 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   const showStatus = () => {
-    if (status) {
-      status.style.display = "block";
+    if (statusMsg) {
+      statusMsg.classList.add("visible");
       setTimeout(() => {
-        status.style.display = "none";
+        statusMsg.classList.remove("visible");
       }, 2000);
     }
   };
 
-  // Save site-specific values
-  saveButton?.addEventListener("click", () => {
-    const domain = domainInput.value;
-    const port = portInput.value;
+  const saveSettings = () => {
+    let domain = DEFAULT_DOMAIN;
+    let port = DEFAULT_PORT;
+
+    if (modeCustom.checked) {
+      const parts = customEndpointInput.value.split(":");
+      domain = parts[0] || DEFAULT_DOMAIN;
+      port = parts[1] || DEFAULT_PORT;
+    }
+
     const enabled = enabledCheckbox.checked;
 
     chrome.storage.local.set({ 
       [currentSiteDomain]: { domain, port, enabled } 
-    }, showStatus);
-  });
+    }, () => {
+      showStatus();
+      updateConnectionStatus(domain, port);
+    });
+  };
 
-  // Save global values
-  saveGlobalButton?.addEventListener("click", () => {
-    const globalDomain = globalDomainInput.value;
-    const globalPort = globalPortInput.value;
-    chrome.storage.local.set({ globalDomain, globalPort }, showStatus);
-  });
+  // Save site-specific values
+  saveButton?.addEventListener("click", saveSettings);
+
+  // Live update for the switch
+  enabledCheckbox.addEventListener("change", saveSettings);
 });

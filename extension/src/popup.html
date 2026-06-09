@@ -3,67 +3,270 @@
   <head>
     <meta charset="UTF-8" />
     <style>
+      :root {
+        --primary: #0088FF;
+        --primary-hover: #0077EE;
+        --bg: #ffffff;
+        --text: #1a1a1a;
+        --text-muted: #666666;
+        --border: #eeeeee;
+        --input-border: #cccccc;
+      }
+
       body {
-        width: 300px;
-        padding: 16px;
+        width: 320px;
+        padding: 20px;
+        padding-bottom: 12px;
+        margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
       }
-      h1 { font-size: 18px; margin-top: 0; }
-      .field { margin-bottom: 12px; }
-      label { display: block; font-size: 12px; margin-bottom: 4px; color: #666; }
-      input { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-      button { 
-        width: 100%; 
-        padding: 10px; 
-        background: #0088FF; 
-        color: white; 
-        border: none; 
-        border-radius: 4px; 
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 4px;
+      }
+
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        font-weight: 700;
+        color: var(--text);
+      }
+
+      .sub-header {
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 24px;
+      }
+
+      /* Switch Button */
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 40px;
+        height: 22px;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
         cursor: pointer;
-        font-weight: bold;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #ccc;
+        transition: .3s;
+        border-radius: 22px;
       }
-      button:hover { background: #0077EE; }
-      .status { font-size: 12px; color: green; margin-top: 8px; display: none; }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 16px;
+        width: 16px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .3s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: var(--primary);
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(18px);
+      }
+
+      /* Options */
+      .section-title {
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+      }
+
+      .option-group {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .option-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        cursor: pointer;
+      }
+
+      .option-item input[type="radio"] {
+        margin-top: 2px;
+        width: 18px;
+        height: 18px;
+        cursor: pointer;
+      }
+
+      .option-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .option-label {
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .option-subtitle {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-family: monospace;
+      }
+
+      .custom-input-container {
+        margin-top: 4px;
+        width: 100%;
+      }
+
+      .custom-input-container.hidden {
+        display: none;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid var(--input-border);
+        border-radius: 6px;
+        box-sizing: border-box;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.2s;
+      }
+
+      input[type="text"]:focus {
+        border-color: var(--primary);
+      }
+
+      /* Connection Status */
+      .status-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 24px;
+        padding: 8px 12px;
+        background: #f9f9f9;
+        border-radius: 8px;
+      }
+
+      #connection-indicator {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #ccc;
+      }
+
+      #connection-text {
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      #current-domain {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-left: auto;
+      }
+
+      /* Button */
+      .save-btn {
+        width: 100%;
+        padding: 12px;
+        background: var(--primary);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 15px;
+        transition: background 0.2s;
+        margin-bottom: 0;
+      }
+
+      .save-btn:hover {
+        background: var(--primary-hover);
+      }
+
+      .status-msg {
+        text-align: center;
+        font-size: 12px;
+        color: #34c759;
+        margin-top: 8px;
+        height: 14px;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+
+      .status-msg.visible {
+        opacity: 1;
+      }
     </style>
   </head>
   <body>
-    <h1>Agentation Settings</h1>
-    <div style="font-size: 11px; color: #888; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
-      <span id="current-domain"></span>
-      <span id="connection-indicator" style="width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block;"></span>
-      <span id="connection-text" style="font-size: 10px; color: #999;">Checking...</span>
-    </div>
-    
-    <div class="field">
-      <label>MCP Server Endpoint (this site)</label>
-      <div style="display: flex; gap: 8px;">
-        <input type="text" id="endpoint-domain" placeholder="localhost" style="flex: 2;" />
-        <input type="text" id="endpoint-port" placeholder="4747" style="flex: 1;" />
-      </div>
-      <div style="font-size: 10px; color: #999; margin-top: 4px;">Leave blank to use global default</div>
-    </div>
-    
-    <div class="field">
-      <label>
-        <input type="checkbox" id="enabled" style="width: auto;" />
-        Enable on this domain
+    <div class="header">
+      <h1>Agentation</h1>
+      <label class="switch">
+        <input type="checkbox" id="enabled">
+        <span class="slider"></span>
       </label>
     </div>
+    <div class="sub-header">Click to Feedbacks</div>
 
-    <button id="save">Save for this site</button>
-    
-    <hr style="border: 0; border-top: 1px solid #eee; margin: 16px 0;" />
-    
-    <div class="field">
-      <label>Global Default Endpoint</label>
-      <div style="display: flex; gap: 8px;">
-        <input type="text" id="global-endpoint-domain" placeholder="localhost" style="flex: 2;" />
-        <input type="text" id="global-endpoint-port" placeholder="4747" style="flex: 1;" />
+    <div class="status-bar">
+      <div id="connection-indicator"></div>
+      <span id="connection-text">Checking...</span>
+      <span id="current-domain"></span>
+    </div>
+
+    <div class="section-title">Endpoint</div>
+    <div class="option-group">
+      <label class="option-item">
+        <input type="radio" name="endpoint-mode" value="default" id="mode-default" checked>
+        <div class="option-content">
+          <span class="option-label">Default</span>
+          <span class="option-subtitle">localhost:4747</span>
+        </div>
+      </label>
+      
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <label class="option-item">
+          <input type="radio" name="endpoint-mode" value="custom" id="mode-custom">
+          <div class="option-content">
+            <span class="option-label">Custom</span>
+          </div>
+        </label>
+        
+        <div id="custom-container" class="custom-input-container hidden">
+          <input type="text" id="custom-endpoint" placeholder="host:port (e.g. 127.0.0.1:4747)">
+        </div>
       </div>
     </div>
-    <button id="save-global" style="background: #666;">Save Global Default</button>
 
-    <div id="status" class="status">Settings saved!</div>
+    <button class="save-btn" id="save">SAVE</button>
+    <div id="status" class="status-msg">Settings saved!</div>
+
     <script src="popup.js"></script>
   </body>
 </html>
