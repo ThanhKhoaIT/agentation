@@ -1,5 +1,6 @@
 import { Annotation } from "../../../types";
 import { IconEdit, IconPlus, IconXmark } from "../../icons";
+import { forceImportantStyles } from "../../../utils/force-important-styles";
 import styles from "./styles.module.scss";
 
 type MarkerClickBehavior = "edit" | "delete";
@@ -70,12 +71,18 @@ export function AnnotationMarker({
 
   return (
     <div
+      id={`agentation-marker-${annotation.id}`}
       className={`${styles.marker} ${isMulti ? styles.multiSelect : ""} ${animClass} ${showDeleteHover ? styles.hovered : ""}`}
       data-annotation-marker
+      ref={forceImportantStyles({
+        "background-color": showDeleteHover
+          ? "var(--agentation-color-red)"
+          : markerColor,
+        "border-radius": isMulti ? "6px" : "50%",
+      })}
       style={{
         left: `${annotation.x}%`,
         top: annotation.y,
-        backgroundColor: showDeleteHover ? undefined : markerColor,
         animationDelay,
       }}
       onMouseEnter={() => onHoverEnter(annotation)}
@@ -150,13 +157,17 @@ export function PendingMarker({
 }: PendingMarkerProps) {
   return (
     <div
+      id="agentation-marker-pending"
       className={`${styles.marker} ${styles.pending} ${isMultiSelect ? styles.multiSelect : ""} ${isExiting ? styles.exit : styles.enter}`}
+      ref={forceImportantStyles({
+        "background-color": isMultiSelect
+          ? "var(--agentation-color-green)"
+          : "var(--agentation-color-accent)",
+        "border-radius": isMultiSelect ? "6px" : "50%",
+      })}
       style={{
         left: `${x}%`,
         top: y,
-        backgroundColor: isMultiSelect
-          ? "var(--agentation-color-green)"
-          : "var(--agentation-color-accent)",
       }}
     >
       <IconPlus size={12} />
@@ -177,8 +188,13 @@ export function ExitingMarker({ annotation, fixed }: ExitingMarkerProps) {
   const isMulti = annotation.isMultiSelect;
   return (
     <div
+      id={`agentation-marker-exiting-${annotation.id}`}
       className={`${styles.marker} ${fixed ? styles.fixed : ""} ${styles.hovered} ${isMulti ? styles.multiSelect : ""} ${styles.exit}`}
       data-annotation-marker
+      ref={forceImportantStyles({
+        "background-color": "var(--agentation-color-red)",
+        "border-radius": isMulti ? "6px" : "50%",
+      })}
       style={{
         left: `${annotation.x}%`,
         top: annotation.y,

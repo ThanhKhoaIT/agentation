@@ -48,6 +48,7 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   return (
     <div
+      id="agentation-settings-panel"
       className={`${styles.settingsPanel} ${isVisible ? styles.enter : styles.exit}`}
       style={
         toolbarNearBottom

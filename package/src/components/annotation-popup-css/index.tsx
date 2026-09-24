@@ -188,6 +188,7 @@ export const AnnotationPopupCSS = forwardRef<AnnotationPopupCSSHandle, Annotatio
     return (
       <div
         ref={popupRef}
+        id="agentation-popup"
         className={popupClassName}
         data-annotation-popup
         style={style}
@@ -258,6 +259,7 @@ export const AnnotationPopupCSS = forwardRef<AnnotationPopupCSSHandle, Annotatio
 
         <textarea
           ref={textareaRef}
+          id="agentation-popup-textarea"
           className={styles.textarea}
           style={{ borderColor: isFocused ? accentColor : undefined }}
           placeholder={placeholder}

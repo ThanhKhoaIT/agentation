@@ -86,8 +86,27 @@ import {
 import type { Annotation } from "../../types";
 import styles from "./styles.module.scss";
 import { generateOutput } from "../../utils/generate-output";
+import { forceImportantStyles } from "../../utils/force-important-styles";
 import { AnnotationMarker, ExitingMarker, PendingMarker } from "./annotation-marker";
 import { SettingsPanel } from "./settings-panel";
+
+// Outline border/background are forced inline with !important so host page CSS can't hide them
+const outlineRef = (
+  color: string,
+  borderStyle: "solid" | "dashed",
+  borderMix: number,
+  backgroundMix: number,
+) =>
+  forceImportantStyles({
+    "border-width": "2px",
+    "border-style": borderStyle,
+    "border-color": `color-mix(in srgb, ${color} ${borderMix}%, transparent)`,
+    "border-radius": "4px",
+    "background-color": `color-mix(in srgb, ${color} ${backgroundMix}%, transparent)`,
+  });
+const hoverOutlineRef = outlineRef("var(--agentation-color-accent)", "solid", 50, 4);
+const singleOutlineRef = outlineRef("var(--agentation-color-accent)", "solid", 60, 5);
+const multiOutlineRef = outlineRef("var(--agentation-color-green)", "dashed", 60, 5);
 
 /**
  * Composes element identification with React component detection.
@@ -3566,9 +3585,10 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
   };
 
   return createPortal(
-    <div ref={portalWrapperRef} style={{ display: "contents" }} data-agentation-theme={isDarkMode ? "dark" : "light"} data-agentation-accent={settings.annotationColorId} data-agentation-root="">
+    <div ref={portalWrapperRef} id="agentation-root" style={{ display: "contents" }} data-agentation-theme={isDarkMode ? "dark" : "light"} data-agentation-accent={settings.annotationColorId} data-agentation-root="">
       {/* Toolbar */}
       <div
+        id="agentation-toolbar"
         className={`${styles.toolbar}${userClassName ? ` ${userClassName}` : ""}`}
         data-feedback-toolbar
         data-agentation-toolbar
@@ -4285,14 +4305,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             !isScrolling &&
             !isDragging && (
               <div
+                id="agentation-hover-highlight"
                 className={`${styles.hoverHighlight} ${styles.enter}`}
+                ref={hoverOutlineRef}
                 style={{
                   left: hoverInfo.rect.left,
                   top: hoverInfo.rect.top,
                   width: hoverInfo.rect.width,
                   height: hoverInfo.rect.height,
-                  borderColor: "color-mix(in srgb, var(--agentation-color-accent) 50%, transparent)",
-                  backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 4%, transparent)",
                 }}
               />
             )}
@@ -4307,23 +4327,19 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
               return (
                 <div
                   key={index}
+                  id={`agentation-outline-selecting-${index}`}
                   className={
                     isMulti
                       ? styles.multiSelectOutline
                       : styles.singleSelectOutline
                   }
+                  ref={isMulti ? multiOutlineRef : singleOutlineRef}
                   style={{
                     position: "fixed",
                     left: rect.left,
                     top: rect.top,
                     width: rect.width,
                     height: rect.height,
-                    ...(isMulti
-                      ? {}
-                      : {
-                          borderColor: "color-mix(in srgb, var(--agentation-color-accent) 60%, transparent)",
-                          backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 5%, transparent)",
-                        }),
                   }}
                 />
               );
@@ -4349,7 +4365,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                       return (
                         <div
                           key={`hover-outline-live-${index}`}
+                          id={`agentation-outline-hover-${index}`}
                           className={`${styles.multiSelectOutline} ${styles.enter}`}
+                          ref={multiOutlineRef}
                           style={{
                             left: rect.left,
                             top: rect.top,
@@ -4365,7 +4383,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                   (bb, index) => (
                     <div
                       key={`hover-outline-${index}`}
+                      id={`agentation-outline-hover-${index}`}
                       className={`${styles.multiSelectOutline} ${styles.enter}`}
+                      ref={multiOutlineRef}
                       style={{
                         left: bb.x,
                         top: bb.y - scrollY,
@@ -4397,18 +4417,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
               const isMulti = hoveredAnnotation.isMultiSelect;
               return (
                 <div
+                  id="agentation-outline-hover"
                   className={`${isMulti ? styles.multiSelectOutline : styles.singleSelectOutline} ${styles.enter}`}
+                  ref={isMulti ? multiOutlineRef : singleOutlineRef}
                   style={{
                     left: bb.x,
                     top: bb.y,
                     width: bb.width,
                     height: bb.height,
-                    ...(isMulti
-                      ? {}
-                      : {
-                          borderColor: "color-mix(in srgb, var(--agentation-color-accent) 60%, transparent)",
-                          backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 5%, transparent)",
-                        }),
                   }}
                 />
               );
@@ -4453,7 +4469,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                       return (
                         <div
                           key={`pending-multi-${index}`}
+                          id={`agentation-outline-pending-${index}`}
                           className={`${styles.multiSelectOutline} ${pendingExiting ? styles.exit : styles.enter}`}
+                          ref={multiOutlineRef}
                           style={{
                             left: rect.left,
                             top: rect.top,
@@ -4472,14 +4490,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                           pendingAnnotation.targetElement!.getBoundingClientRect();
                         return (
                           <div
+                            id="agentation-outline-pending"
                             className={`${styles.singleSelectOutline} ${pendingExiting ? styles.exit : styles.enter}`}
+                            ref={singleOutlineRef}
                             style={{
                               left: rect.left,
                               top: rect.top,
                               width: rect.width,
                               height: rect.height,
-                              borderColor: "color-mix(in srgb, var(--agentation-color-accent) 60%, transparent)",
-                              backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 5%, transparent)",
                             }}
                           />
                         );
@@ -4487,18 +4505,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                     : // Drag selection or fallback: use stored boundingBox
                       pendingAnnotation.boundingBox && (
                         <div
+                          id="agentation-outline-pending"
                           className={`${pendingAnnotation.isMultiSelect ? styles.multiSelectOutline : styles.singleSelectOutline} ${pendingExiting ? styles.exit : styles.enter}`}
+                          ref={pendingAnnotation.isMultiSelect ? multiOutlineRef : singleOutlineRef}
                           style={{
                             left: pendingAnnotation.boundingBox.x,
                             top: pendingAnnotation.boundingBox.y - scrollY,
                             width: pendingAnnotation.boundingBox.width,
                             height: pendingAnnotation.boundingBox.height,
-                            ...(pendingAnnotation.isMultiSelect
-                              ? {}
-                              : {
-                                  borderColor: "color-mix(in srgb, var(--agentation-color-accent) 60%, transparent)",
-                                  backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 5%, transparent)",
-                                }),
                           }}
                         />
                       )}
@@ -4578,7 +4592,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                           return (
                             <div
                               key={`edit-multi-live-${index}`}
+                              id={`agentation-outline-edit-${index}`}
                               className={`${styles.multiSelectOutline} ${styles.enter}`}
+                              ref={multiOutlineRef}
                               style={{
                                 left: rect.left,
                                 top: rect.top,
@@ -4594,7 +4610,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                       (bb, index) => (
                         <div
                           key={`edit-multi-${index}`}
+                          id={`agentation-outline-edit-${index}`}
                           className={`${styles.multiSelectOutline} ${styles.enter}`}
+                          ref={multiOutlineRef}
                           style={{
                             left: bb.x,
                             top: bb.y - scrollY,
@@ -4631,18 +4649,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
 
                     return (
                       <div
+                        id="agentation-outline-edit"
                         className={`${editingAnnotation.isMultiSelect ? styles.multiSelectOutline : styles.singleSelectOutline} ${styles.enter}`}
+                        ref={editingAnnotation.isMultiSelect ? multiOutlineRef : singleOutlineRef}
                         style={{
                           left: bb.x,
                           top: bb.y,
                           width: bb.width,
                           height: bb.height,
-                          ...(editingAnnotation.isMultiSelect
-                            ? {}
-                            : {
-                                borderColor: "color-mix(in srgb, var(--agentation-color-accent) 60%, transparent)",
-                                backgroundColor: "color-mix(in srgb, var(--agentation-color-accent) 5%, transparent)",
-                              }),
                         }}
                       />
                     );

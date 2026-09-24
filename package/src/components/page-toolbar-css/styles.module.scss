@@ -17,6 +17,28 @@
   }
 }
 
+// Keep our font and the browser-default selection color regardless of host page
+// rules like `div { font-family: ... }` or `::selection { ... }`. Component rules
+// are id-scoped at build time (tsup.config.ts), so they still override `inherit`.
+:global(#agentation-root) {
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif !important;
+}
+
+:global(#agentation-root) * {
+  font-family: inherit;
+}
+
+:global(#agentation-root) ::selection {
+  background: Highlight;
+  color: HighlightText;
+}
+
 // Protect toolbar elements from host page global CSS.
 // The toolbar is portaled to document.body, so global rules like
 // `button { background: black }` leak in. :where() zeroes specificity

@@ -71,6 +71,7 @@ export const Tooltip = ({
       {shouldRender &&
         createPortal(
           <div
+            id="agentation-tooltip"
             data-feedback-toolbar
             style={{
               position: "fixed",
@@ -80,6 +81,8 @@ export const Tooltip = ({
               padding: "6px 10px",
               background: "#383838",
               color: "rgba(255, 255, 255, 0.7)",
+              fontFamily:
+                'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
               fontSize: "11px",
               fontWeight: 400,
               lineHeight: "14px",

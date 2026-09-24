@@ -15,6 +15,16 @@
   }
 }
 
+// Popup can be rendered standalone (public export), outside #agentation-root
+:global(#agentation-popup) * {
+  font-family: inherit;
+}
+
+:global(#agentation-popup) ::selection {
+  background: Highlight;
+  color: HighlightText;
+}
+
 // Protect popup elements from host page global CSS.
 // The popup is portaled to document.body, so global rules like
 // `textarea { background: white }` leak in. :where() zeroes specificity
