@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "zip": "pnpm build && rm -f agentation-extension.zip && cd dist && zip -qr ../agentation-extension.zip . -x '.*'"
+    "zip": "pnpm build && rm -f agentation-extension.zip && cd dist && zip -qr ../agentation-extension.zip . -x '.*'",
+    "pack:crx": "bash scripts/pack-crx.sh"
   },
   "dependencies": {
     "agentation": "workspace:*",

@@ -10,7 +10,7 @@ Browser extension ──HTTPS + ingest key──▶ feedback.your-domain.com (Cl
   by Google Workspace)                           ▼
                               docker compose: cloudflared ──▶ agentation server (SQLite volume)
                                                  ▲
-Claude Code ──HTTPS + agent key, --project/--domains──┘
+Claude Code ──HTTPS /mcp + agent key, project + domains──┘
 ```
 
 - **Domains allowlist**: a site can send feedback only after a developer's MCP
@@ -80,31 +80,68 @@ Point a DNS record at the server, remove the `cloudflared` service from
 
 ## 2. Developers (Claude Code)
 
-The published `agentation-mcp` on npm doesn't have these options yet, so build
-this repo once:
+Claude Code connects straight to the server over HTTP — nothing to clone,
+build or install.
+
+**Once per project** (whoever sets it up): copy
+[`mcp.example.json`](../mcp.example.json) to `.mcp.json` at the project root,
+fill in the three values below, and **commit it** (it holds no secret):
+
+- `url`: your server + `/mcp`
+- `X-Agentation-Project`: a name for the project
+- `X-Agentation-Domains`: every host where this project runs (production,
+  staging, `localhost:3000`…), exactly as in the browser, with the port if any
+
+**Each new developer**: add the agent key to your shell profile (e.g.
+`~/.zshrc`), open a new terminal, and start `claude` in the project. Approve the
+project's `agentation` MCP server when Claude Code asks.
 
 ```bash
-cd agentation && pnpm install && pnpm --filter agentation-mcp build
+export AGENTATION_AGENT_AUTH="agent:<password from the server's .env>"
 ```
 
-Add the agent key to your shell profile (not to any repo):
+Claude Code fills in `${AGENTATION_AGENT_AUTH}` from your environment **when it
+starts** — restart `claude` after changing the key. On connect, the server
+registers the project's domains on the allowlist, and the tools only return
+feedback from them.
+
+> Claude Code opened from the desktop app or an IDE on macOS may not read
+> `~/.zshrc`. Set the variable for GUI apps with
+> `launchctl setenv AGENTATION_AGENT_AUTH "agent:<password>"`, or use
+> `claude mcp add` below.
+
+### Check it works
+
+In the project run `claude`, then `/mcp`: `agentation` should be **connected**.
+Ask Claude Code to "list agentation domains" — you should see this project's
+domains.
+
+- `401 Unauthorized` → the key is wrong or wasn't loaded into Claude Code's
+  environment.
+- "Dynamic Client Registration rejected" → the server runs an older build
+  that doesn't accept `X-Agentation-Auth` yet: rebuild and restart it.
+
+### Only on your machine (`claude mcp add`)
+
+To skip `.mcp.json`, or if the variable isn't picked up, add the server for
+yourself (stored in `~/.claude.json`, not in the repo):
 
 ```bash
-export AGENTATION_AGENT_AUTH="agent:<password from .env>"
+claude mcp add --transport http --scope local agentation https://feedback.your-domain.com/mcp \
+  --header "X-Agentation-Auth: agent:<password>" \
+  --header "X-Agentation-Project: your-project" \
+  --header "X-Agentation-Domains: your-domain.com,staging.your-domain.com,localhost:3000"
 ```
 
-In each project, copy [`mcp.example.json`](../mcp.example.json) to `.mcp.json`
-and set:
+### Running the MCP client locally (stdio)
 
-- the path to `mcp/dist/cli.js`
-- `--http-url`: your server
-- `--project`: a name for the project
-- `--domains`: every host where this project runs (production, staging,
-  `localhost:3000`…). Use the host exactly as in the browser, with the port if
-  there is one.
+Instead of HTTP you can run the MCP client on your machine: build this repo
+(`pnpm install && pnpm --filter agentation-mcp build`) and use
+[`mcp.stdio.example.json`](../mcp.stdio.example.json). It takes the same values as
+flags (`--project`, `--domains`) and the key as `AGENTATION_AUTH`. The published
+`agentation-mcp` on npm doesn't have these options yet.
 
-When Claude Code starts, the MCP server registers these domains on the
-allowlist, and its tools only return feedback from them.
+### Tools
 
 | Tool | What it does |
 |---|---|
@@ -161,4 +198,5 @@ supported.
 | `cloudflared` keeps restarting | Wrong `CLOUDFLARE_TUNNEL_TOKEN` — `docker compose logs cloudflared` says "Provided Tunnel token is not valid" |
 | Cloudflare error 502 / 1033 | The tunnel's public hostname doesn't point to `http://agentation:4747`, or the server isn't healthy (`docker compose ps`) |
 | Extension gets an HTML login page | Cloudflare Access is enabled on the hostname — remove it (see Cloudflare notes) |
-| Claude Code sees no feedback | Check `--http-url`, `AGENTATION_AGENT_AUTH`, and that `--domains` match the hosts people use |
+| Claude Code sees no feedback | Check that `/mcp` shows `agentation` connected, and that `X-Agentation-Domains` (or `--domains`) match the hosts people use |
+| Claude Code: "Dynamic Client Registration rejected" | The server is an older build without `X-Agentation-Auth` support — rebuild and restart it |

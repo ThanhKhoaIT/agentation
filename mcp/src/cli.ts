@@ -235,7 +235,7 @@ if (command === "init") {
   });
 } else if (command === "server") {
   // Dynamic import to avoid loading server code for other commands
-  import("./server/index.js").then(({ startHttpServer, startMcpServer, setApiKey, setAuth, setProjectDomains, parseDomainList }) => {
+  import("./server/index.js").then(({ startHttpServer, startMcpServer, setApiKey, setAuth, setProjectDomains, setHttpBaseUrl, parseDomainList }) => {
     const args = process.argv.slice(3);
     let port = 4747;
     let mcpOnly = false;
@@ -301,6 +301,9 @@ if (command === "init") {
     const project = (projectArg || process.env.AGENTATION_PROJECT)?.trim() || undefined;
     const domains = parseDomainList(domainsArg || process.env.AGENTATION_DOMAINS);
     setProjectDomains(project, domains);
+
+    // Tools (stdio or the HTTP /mcp endpoint) reach the API at this URL
+    setHttpBaseUrl(httpUrl);
 
     if (!mcpOnly) {
       startHttpServer(port, apiKey);

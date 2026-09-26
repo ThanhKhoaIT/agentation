@@ -10,7 +10,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { TOOLS, handleTool, error as toolError } from "./mcp.js";
+import { TOOLS, handleTool, registerProjectDomains, error as toolError, type ToolScope } from "./mcp.js";
 import {
   createSession,
   getSession,
@@ -80,9 +80,23 @@ const agentConnections = new Set<ServerResponse>();
 const mcpTransports = new Map<string, StreamableHTTPServerTransport>();
 
 /**
+ * Project scope for an HTTP MCP session, from the client's config headers:
+ * X-Agentation-Project and X-Agentation-Domains (comma-separated).
+ */
+function mcpScopeFromHeaders(req: IncomingMessage): ToolScope {
+  const projectHeader = req.headers["x-agentation-project"];
+  const domainsHeader = req.headers["x-agentation-domains"];
+  const project = typeof projectHeader === "string" ? projectHeader.trim().slice(0, 100) : "";
+  return {
+    project: project || undefined,
+    domains: parseDomainList(typeof domainsHeader === "string" ? domainsHeader : undefined),
+  };
+}
+
+/**
  * Initialize a new MCP server with HTTP transport for a session.
  */
-function createMcpSession(): { server: Server; transport: StreamableHTTPServerTransport } {
+function createMcpSession(scope: ToolScope): { server: Server; transport: StreamableHTTPServerTransport } {
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: () => crypto.randomUUID(),
   });
@@ -95,7 +109,7 @@ function createMcpSession(): { server: Server; transport: StreamableHTTPServerTr
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
-      return await handleTool(req.params.name, req.params.arguments);
+      return await handleTool(req.params.name, req.params.arguments, scope);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       return toolError(message);
@@ -243,7 +257,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID, X-Agentation-Reporter"
+    "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID, X-Agentation-Reporter, X-Agentation-Auth, X-Agentation-Project, X-Agentation-Domains"
   );
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
@@ -941,8 +955,13 @@ async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<voi
       transport = mcpTransports.get(sessionId)!;
     } else {
       // No session ID - this should be an initialize request, create new session
-      const { transport: newTransport } = createMcpSession();
+      const scope = mcpScopeFromHeaders(req);
+      const { transport: newTransport } = createMcpSession(scope);
       transport = newTransport;
+      // Register the project's domains right away; tool calls retry if this fails
+      registerProjectDomains(scope).catch((err) =>
+        log(`[MCP HTTP] Domain registration failed: ${(err as Error).message}`)
+      );
     }
 
     try {
@@ -1236,11 +1255,17 @@ export function startHttpServer(port: number, apiKey?: string): void {
       return sendJson(res, 200, { status: "ok", mode: isCloudMode() ? "cloud" : "local" });
     }
 
+    // No OAuth here. Answer discovery/registration with 404 so MCP clients
+    // (e.g. Claude Code) use the configured headers instead of starting OAuth.
+    if (pathname.startsWith("/.well-known/") || pathname === "/register" || pathname === "/authorize" || pathname === "/token") {
+      return sendError(res, 404, "This server doesn't use OAuth. Send X-Agentation-Auth: user:password (or HTTP Basic auth).");
+    }
+
     // Everything else requires credentials when auth is enabled.
     // No WWW-Authenticate header: it would make browsers show a login dialog.
     const role = authenticate(req);
     if (!role) {
-      return sendError(res, 401, "Unauthorized");
+      return sendError(res, 401, "Unauthorized: send X-Agentation-Auth: user:password (or HTTP Basic auth)");
     }
 
     // Status endpoint (always local)

@@ -1,17 +1,12 @@
 {
   "mcpServers": {
     "agentation": {
-      "command": "node",
-      "args": [
-        "/path/to/agentation/mcp/dist/cli.js",
-        "server",
-        "--mcp-only",
-        "--http-url", "https://feedback.your-domain.com",
-        "--project", "your-project",
-        "--domains", "your-domain.com,staging.your-domain.com,localhost:3000"
-      ],
-      "env": {
-        "AGENTATION_AUTH": "${AGENTATION_AGENT_AUTH}"
+      "type": "http",
+      "url": "https://feedback.your-domain.com/mcp",
+      "headers": {
+        "X-Agentation-Auth": "${AGENTATION_AGENT_AUTH}",
+        "X-Agentation-Project": "your-project",
+        "X-Agentation-Domains": "your-domain.com,staging.your-domain.com,localhost:3000"
       }
     }
   }

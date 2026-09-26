@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "agentation": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/agentation/mcp/dist/cli.js",
+        "server",
+        "--mcp-only",
+        "--http-url", "https://feedback.your-domain.com",
+        "--project", "your-project",
+        "--domains", "your-domain.com,staging.your-domain.com,localhost:3000"
+      ],
+      "env": {
+        "AGENTATION_AUTH": "${AGENTATION_AGENT_AUTH}"
+      }
+    }
+  }
+}

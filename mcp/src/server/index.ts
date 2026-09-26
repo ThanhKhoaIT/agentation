@@ -21,7 +21,7 @@ import { startMcpServer, setApiKey } from "./mcp.js";
 
 // Re-export for programmatic use
 export { startHttpServer, setCloudApiKey } from "./http.js";
-export { startMcpServer, setApiKey, setAuth, setProjectDomains } from "./mcp.js";
+export { startMcpServer, setApiKey, setAuth, setProjectDomains, setHttpBaseUrl } from "./mcp.js";
 export * from "./store.js";
 export { parseDomainList } from "./domains.js";
 

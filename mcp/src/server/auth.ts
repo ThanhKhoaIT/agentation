@@ -40,17 +40,27 @@ function matches(candidate: string, expected: string | undefined): boolean {
   return timingSafeEqual(digest(candidate), digest(expected));
 }
 
+/** Plain "user:password" header, for clients that can't base64-encode (MCP config files) */
+export const RAW_AUTH_HEADER = "x-agentation-auth";
+
+function readRequestCredential(req: IncomingMessage): string | undefined {
+  const header = req.headers.authorization;
+  if (header?.startsWith("Basic ")) {
+    return Buffer.from(header.slice(6).trim(), "base64").toString("utf-8");
+  }
+  const raw = req.headers[RAW_AUTH_HEADER];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
 /**
- * Resolve the caller's role from the Authorization header.
+ * Resolve the caller's role from HTTP Basic auth or the X-Agentation-Auth header.
  * Returns undefined when auth is enabled and credentials are missing or wrong.
  */
 export function authenticate(req: IncomingMessage): Role | undefined {
   if (!isAuthEnabled()) return "agent";
 
-  const header = req.headers.authorization;
-  if (!header || !header.startsWith("Basic ")) return undefined;
-
-  const decoded = Buffer.from(header.slice(6).trim(), "base64").toString("utf-8");
+  const decoded = readRequestCredential(req);
+  if (!decoded) return undefined;
   // Check both so timing does not reveal which credential matched
   const isAgent = matches(decoded, agentCredential);
   const isIngest = matches(decoded, ingestCredential);

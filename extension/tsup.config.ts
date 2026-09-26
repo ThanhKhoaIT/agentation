@@ -32,9 +32,14 @@ export default defineConfig({
       }
     }
     
-    // Copy manifest.json to dist
-    fs.copyFileSync("manifest.json", "dist/manifest.json");
-    console.log("Copied manifest.json to dist");
+    // Copy manifest.json to dist. For self-hosted installs, EXTENSION_UPDATE_URL
+    // (your update.xml) is added at build time so it never lives in the repo.
+    const manifest = JSON.parse(fs.readFileSync("manifest.json", "utf-8"));
+    if (process.env.EXTENSION_UPDATE_URL) {
+      manifest.update_url = process.env.EXTENSION_UPDATE_URL;
+    }
+    fs.writeFileSync("dist/manifest.json", JSON.stringify(manifest, null, 2) + "\n");
+    console.log(`Copied manifest.json to dist${manifest.update_url ? " (with update_url)" : ""}`);
 
     // Copy static files to dist
     for (const file of ["popup.html", "sidepanel.html", "managed_schema.json"]) {

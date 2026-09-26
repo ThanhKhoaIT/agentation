@@ -23,9 +23,18 @@ import { basicAuthHeader } from "./auth.js";
 let httpBaseUrl = "http://localhost:4747";
 let apiKey: string | undefined;
 let authHeader: string | undefined;
-let project: string | undefined;
-let domains: string[] = [];
-let domainRegistration: Promise<void> | undefined;
+/**
+ * Which project a client works on. Tools only return feedback of its domains
+ * (empty = all). The stdio server has one scope; each HTTP /mcp session has its own.
+ */
+export type ToolScope = {
+  project?: string;
+  domains: string[];
+  /** Pending/finished allowlist registration of `domains` */
+  registration?: Promise<void>;
+};
+
+const defaultScope: ToolScope = { domains: [] };
 
 /**
  * Set the HTTP server URL that this MCP server will fetch from.
@@ -53,8 +62,8 @@ export function setAuth(credential: string): void {
  * are registered on the server (allowlist), and every read is filtered to them.
  */
 export function setProjectDomains(projectName: string | undefined, projectDomains: string[]): void {
-  project = projectName;
-  domains = projectDomains;
+  defaultScope.project = projectName;
+  defaultScope.domains = projectDomains;
 }
 
 function withAuth(headers: Record<string, string>): Record<string, string> {
@@ -70,10 +79,10 @@ function withAuth(headers: Record<string, string>): Record<string, string> {
 /**
  * Append the project's domain filter to a list/stream path.
  */
-function withDomains(path: string): string {
-  if (domains.length === 0) return path;
+function withDomains(path: string, scope: ToolScope): string {
+  if (scope.domains.length === 0) return path;
   const separator = path.includes("?") ? "&" : "?";
-  return `${path}${separator}domains=${encodeURIComponent(domains.join(","))}`;
+  return `${path}${separator}domains=${encodeURIComponent(scope.domains.join(","))}`;
 }
 
 // -----------------------------------------------------------------------------
@@ -147,16 +156,17 @@ type RegisterDomainsResponse = {
  * Register the project's domains on the server allowlist. Runs once; if the
  * server was unreachable it is retried on the next tool call.
  */
-function registerProjectDomains(): Promise<void> {
-  if (!domainRegistration) {
-    domainRegistration = doRegisterProjectDomains().then((ok) => {
-      if (!ok) domainRegistration = undefined;
+export function registerProjectDomains(scope: ToolScope = defaultScope): Promise<void> {
+  if (!scope.registration) {
+    scope.registration = doRegisterProjectDomains(scope).then((ok) => {
+      if (!ok) scope.registration = undefined;
     });
   }
-  return domainRegistration;
+  return scope.registration;
 }
 
-async function doRegisterProjectDomains(): Promise<boolean> {
+async function doRegisterProjectDomains(scope: ToolScope): Promise<boolean> {
+  const { project, domains } = scope;
   if (domains.length === 0) return true;
   if (!project) {
     console.error("[MCP] --domains is set but --project is missing — skipping domain registration");
@@ -538,7 +548,8 @@ type WatchAnnotationsResult =
 function watchForAnnotations(
   sessionId: string | undefined,
   batchWindowMs: number,
-  timeoutMs: number
+  timeoutMs: number,
+  scope: ToolScope
 ): Promise<WatchAnnotationsResult> {
   return new Promise((resolve) => {
     let aborted = false;
@@ -562,7 +573,7 @@ function watchForAnnotations(
     // Connect to SSE endpoint with agent=true to be counted as an agent listener
     const sseUrl = sessionId
       ? `${httpBaseUrl}/sessions/${sessionId}/events?agent=true`
-      : `${httpBaseUrl}${withDomains("/events?agent=true")}`;
+      : `${httpBaseUrl}${withDomains("/events?agent=true", scope)}`;
 
     const sseHeaders = withAuth({ Accept: "text/event-stream" });
 
@@ -664,12 +675,16 @@ function watchForAnnotations(
   });
 }
 
-export async function handleTool(name: string, args: unknown): Promise<ToolResult> {
-  await registerProjectDomains();
+export async function handleTool(
+  name: string,
+  args: unknown,
+  scope: ToolScope = defaultScope
+): Promise<ToolResult> {
+  await registerProjectDomains(scope);
 
   switch (name) {
     case "agentation_list_sessions": {
-      const sessions = await httpGet<Session[]>(withDomains("/sessions"));
+      const sessions = await httpGet<Session[]>(withDomains("/sessions", scope));
       return success({
         sessions: sessions.map((s) => ({
           id: s.id,
@@ -703,7 +718,7 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
     }
 
     case "agentation_get_all_pending": {
-      const response = await httpGet<PendingResponse>(withDomains("/pending"));
+      const response = await httpGet<PendingResponse>(withDomains("/pending", scope));
       return success({
         count: response.count,
         annotations: response.annotations.map(mapAnnotationForMcp),
@@ -791,7 +806,7 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
       // This catches annotations that arrived while the caller was busy processing
       // the previous batch (when watch_annotations wasn't running).
       try {
-        const pendingPath = sessionId ? `/sessions/${sessionId}/pending` : withDomains("/pending");
+        const pendingPath = sessionId ? `/sessions/${sessionId}/pending` : withDomains("/pending", scope);
         const pending = await httpGet<PendingResponse>(pendingPath);
         if (pending.count > 0) {
           const sessions = [...new Set(pending.annotations.map((a) => a.sessionId))];
@@ -809,7 +824,8 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
       const result = await watchForAnnotations(
         sessionId,
         batchWindowSeconds * 1000,
-        timeoutSeconds * 1000
+        timeoutSeconds * 1000,
+        scope
       );
 
       switch (result.type) {
@@ -917,7 +933,7 @@ export async function startMcpServer(baseUrl?: string): Promise<void> {
   // Log startup message with connection details
   const isRemote = httpBaseUrl.startsWith("https://") || (!httpBaseUrl.includes("localhost") && !httpBaseUrl.includes("127.0.0.1"));
   if (isRemote && authHeader) {
-    console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, auth: configured, project: ${project ?? "-"}, domains: ${domains.join(", ") || "all"})`);
+    console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, auth: configured, project: ${defaultScope.project ?? "-"}, domains: ${defaultScope.domains.join(", ") || "all"})`);
   } else if (isRemote && apiKey) {
     console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, API key: configured)`);
   } else if (isRemote) {
