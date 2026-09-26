@@ -1,6 +1,7 @@
 node_modules
 mcp/dist
 extension/dist
+extension/*.zip
 .DS_Store
 
 # Secrets / local agent config

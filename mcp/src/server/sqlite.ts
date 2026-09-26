@@ -34,8 +34,16 @@ import { domainOfUrl } from "./domains.js";
 // Database Setup
 // -----------------------------------------------------------------------------
 
+/**
+ * Directory for store.db: AGENTATION_DATA_DIR (e.g. a Docker volume),
+ * otherwise ~/.agentation.
+ */
+export function getDataDir(): string {
+  return process.env.AGENTATION_DATA_DIR?.trim() || join(homedir(), ".agentation");
+}
+
 function getDbPath(): string {
-  const dataDir = join(homedir(), ".agentation");
+  const dataDir = getDataDir();
   if (!existsSync(dataDir)) {
     mkdirSync(dataDir, { recursive: true });
   }
@@ -363,7 +371,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
   };
 
   // Prune events older than retention period on startup
-  const retentionDays = parseInt(process.env.AGENTATION_EVENT_RETENTION_DAYS || "7", 10);
+  const retentionDays = parseInt(process.env.AGENTATION_EVENT_RETENTION_DAYS || "30", 10);
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   stmts.pruneOldEvents.run(cutoff);
 
@@ -798,7 +806,7 @@ export function createTenantStore(dbPath?: string): TenantStore {
   };
 
   // Prune events older than retention period on startup
-  const retentionDays = parseInt(process.env.AGENTATION_EVENT_RETENTION_DAYS || "7", 10);
+  const retentionDays = parseInt(process.env.AGENTATION_EVENT_RETENTION_DAYS || "30", 10);
   const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   tenantStmts.pruneOldEvents.run(cutoff);
 

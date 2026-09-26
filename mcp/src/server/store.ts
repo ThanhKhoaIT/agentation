@@ -1,7 +1,7 @@
 /**
  * Store module - provides persistence for sessions and annotations.
  *
- * By default uses SQLite (~/.agentation/store.db).
+ * By default uses SQLite (store.db in AGENTATION_DATA_DIR or ~/.agentation).
  * Falls back to in-memory storage if SQLite fails to initialize.
  *
  * Usage:
@@ -53,9 +53,9 @@ function initializeStore(): AFSStore {
   try {
     // Dynamic import to avoid issues if better-sqlite3 isn't available
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { createSQLiteStore } = require("./sqlite.js");
+    const { createSQLiteStore, getDataDir } = require("./sqlite.js");
     const store = createSQLiteStore();
-    process.stderr.write("[Store] Using SQLite store (~/.agentation/store.db)\n");
+    process.stderr.write(`[Store] Using SQLite store (${getDataDir()}/store.db)\n`);
     return store;
   } catch (err) {
     console.warn("[Store] SQLite unavailable, falling back to in-memory:", (err as Error).message);

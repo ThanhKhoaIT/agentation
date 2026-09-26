@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "zip": "pnpm build && rm -f agentation-extension.zip && cd dist && zip -qr ../agentation-extension.zip . -x '.*'"
   },
   "dependencies": {
     "agentation": "workspace:*",

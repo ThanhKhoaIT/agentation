@@ -1,0 +1,34 @@
+# Copy to docker-compose.yml, fill in .env (see .env.example), then:
+#   docker compose up -d --build
+#
+# HTTPS and the domain come from a Cloudflare Tunnel: no open ports, no
+# certificates on this machine. See README.md for creating the tunnel.
+services:
+  agentation:
+    build: ../mcp
+    image: agentation-server
+    restart: unless-stopped
+    # Only the variables the server needs (the tunnel token stays out of it)
+    environment:
+      AGENTATION_AGENT_AUTH: ${AGENTATION_AGENT_AUTH:?Set AGENTATION_AGENT_AUTH in .env}
+      AGENTATION_INGEST_AUTH: ${AGENTATION_INGEST_AUTH:?Set AGENTATION_INGEST_AUTH in .env}
+      AGENTATION_EVENT_RETENTION_DAYS: ${AGENTATION_EVENT_RETENTION_DAYS:-30}
+    volumes:
+      - agentation-data:/data
+    # Not published by default: traffic arrives through the tunnel.
+    # Uncomment to reach it from this machine (or to use Caddy/Nginx instead):
+    # ports:
+    #   - "127.0.0.1:4747:4747"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env}
+    depends_on:
+      agentation:
+        condition: service_healthy
+
+volumes:
+  agentation-data:

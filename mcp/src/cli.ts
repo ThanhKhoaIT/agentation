@@ -239,6 +239,7 @@ if (command === "init") {
     const args = process.argv.slice(3);
     let port = 4747;
     let mcpOnly = false;
+    let httpOnly = false;
     let httpUrl = "http://localhost:4747";
     let apiKeyArg: string | undefined;
     let authArg: string | undefined;
@@ -258,6 +259,9 @@ if (command === "init") {
       }
       if (args[i] === "--mcp-only") {
         mcpOnly = true;
+      }
+      if (args[i] === "--http-only") {
+        httpOnly = true;
       }
       if (args[i] === "--http-url" && args[i + 1]) {
         httpUrl = args[i + 1];
@@ -301,10 +305,13 @@ if (command === "init") {
     if (!mcpOnly) {
       startHttpServer(port, apiKey);
     }
-    startMcpServer(httpUrl).catch((err) => {
-      console.error("MCP server error:", err);
-      process.exit(1);
-    });
+    // --http-only: hosted server (e.g. Docker) with no stdio client
+    if (!httpOnly) {
+      startMcpServer(httpUrl).catch((err) => {
+        console.error("MCP server error:", err);
+        process.exit(1);
+      });
+    }
   });
 } else if (command === "help" || command === "--help" || command === "-h" || !command) {
   console.log(`
@@ -319,6 +326,7 @@ Usage:
 Server Options:
   --port <port>      HTTP server port (default: 4747)
   --mcp-only         Skip HTTP server, only run MCP on stdio
+  --http-only        Skip MCP on stdio, only run the HTTP server (for hosting, e.g. Docker)
   --http-url <url>   HTTP server URL for MCP to fetch from
   --api-key <key>    API key for cloud storage (or set AGENTATION_API_KEY env var)
   --auth <user:pass> Basic auth for a self-hosted server (or AGENTATION_AUTH)
@@ -360,6 +368,7 @@ Examples:
 Self-hosted server environment:
   AGENTATION_AGENT_AUTH   "user:pass" for MCP clients (full access)
   AGENTATION_INGEST_AUTH  "user:pass" for the browser extension
+  AGENTATION_DATA_DIR     Directory for store.db (default: ~/.agentation)
   Setting either enables auth and the domain allowlist.
 `);
 } else {

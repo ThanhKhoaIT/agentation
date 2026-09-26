@@ -1,0 +1,10 @@
+# Caddy gets and renews the HTTPS certificate automatically.
+# Replace the domain, then: sudo cp Caddyfile.example /etc/caddy/Caddyfile && sudo systemctl reload caddy
+feedback.your-domain.com {
+	encode gzip
+
+	# Server-sent events (/events, /sessions/*/events) need unbuffered, long-lived responses
+	reverse_proxy 127.0.0.1:4747 {
+		flush_interval -1
+	}
+}
