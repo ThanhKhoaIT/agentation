@@ -4,6 +4,7 @@ import * as fs from "fs";
 
 export default defineConfig({
   entry: {
+    loader: "src/loader.ts",
     content: "src/content.tsx",
     popup: "src/popup.ts",
     sidepanel: "src/sidepanel.ts",
@@ -24,7 +25,7 @@ export default defineConfig({
   },
   async onSuccess() {
     // Rename <entry>.global.js to <entry>.js
-    for (const name of ["content", "popup", "sidepanel", "background"]) {
+    for (const name of ["loader", "content", "popup", "sidepanel", "background"]) {
       if (fs.existsSync(`dist/${name}.global.js`)) {
         fs.renameSync(`dist/${name}.global.js`, `dist/${name}.js`);
         console.log(`Renamed ${name}.global.js to ${name}.js`);

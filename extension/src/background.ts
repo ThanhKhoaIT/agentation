@@ -7,6 +7,7 @@
  *   fetch/EventSource cannot set headers themselves, so this is done with a
  *   declarativeNetRequest rule limited to allowlisted initiator sites.
  * - Disables the side panel on tabs whose site is not supported.
+ * - Injects the toolbar bundle into a page when loader.ts asks for it.
  */
 
 import {
@@ -135,6 +136,21 @@ async function refreshAll(): Promise<void> {
   await syncHeaderRule();
   await syncSidePanelAllTabs();
 }
+
+// loader.ts (our own content script) asks for the toolbar once the site is enabled
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "agentation:inject-toolbar") return;
+  const tabId = sender.tab?.id;
+  if (tabId === undefined) return;
+  chrome.scripting
+    .executeScript({ target: { tabId, frameIds: [sender.frameId ?? 0] }, files: ["content.js"] })
+    .then(() => sendResponse({ ok: true }))
+    .catch((err) => {
+      console.error(`[Agentation] Toolbar injection failed for tab ${tabId}:`, err);
+      sendResponse({ ok: false });
+    });
+  return true; // respond asynchronously
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   refreshAll().catch((err) => console.error("[Agentation] Init failed:", err));
