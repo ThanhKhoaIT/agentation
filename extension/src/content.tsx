@@ -5,10 +5,53 @@
 
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Agentation, type Annotation } from "agentation";
-import { KEYS, getCachedAllowlist, getConfig, getSiteSettings, isSiteEnabled } from "./config";
+import { Agentation, type Annotation, type ToolbarAction, type ToolbarFeatures } from "agentation";
+import {
+  KEYS,
+  getCachedAllowlist,
+  getConfig,
+  getSiteSettings,
+  isExtensionContextValid,
+  isSiteEnabled,
+} from "./config";
 
 const ROOT_ID = "agentation-extension-root";
+
+// Business users mostly leave comments: hide developer tools
+const TOOLBAR_FEATURES: Partial<ToolbarFeatures> = {
+  pause: false,
+  layout: false,
+  send: false,
+  clear: false,
+  elementStyles: false,
+  reactComponents: false,
+  version: false,
+  webhooks: false,
+};
+
+const PanelIcon = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="4" y="5" width="16" height="14" rx="2" />
+    <path d="M14.5 5v14" />
+  </svg>
+);
+
+const TOOLBAR_ACTIONS: ToolbarAction[] = [
+  {
+    id: "toggle-panel",
+    label: "Open/close panel",
+    icon: <PanelIcon />,
+    onClick: () => {
+      if (!isExtensionContextValid()) {
+        console.info("[Agentation] The extension was updated. Reload this page to use the panel.");
+        return;
+      }
+      chrome.runtime
+        .sendMessage({ type: "agentation:toggle-panel" })
+        .catch((err) => console.error("[Agentation] Could not toggle the feedback panel:", err));
+    },
+  },
+];
 const NOTIFY_DEBOUNCE_MS = 300;
 const SHARED_REFRESH_DEBOUNCE_MS = 300;
 // While the live stream is down: refresh this often, then try the stream again
@@ -128,7 +171,9 @@ function App() {
     };
 
     chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
+    return () => {
+      if (isExtensionContextValid()) chrome.storage.onChanged.removeListener(listener);
+    };
   }, []);
 
   const sharedAnnotations = useSharedAnnotations(endpoint, isLoaded && isEnabled);
@@ -137,7 +182,14 @@ function App() {
 
   return (
     <React.StrictMode>
-      <Agentation endpoint={endpoint} sharedAnnotations={sharedAnnotations} />
+      <Agentation
+        endpoint={endpoint}
+        sharedAnnotations={sharedAnnotations}
+        features={TOOLBAR_FEATURES}
+        actions={TOOLBAR_ACTIONS}
+        markerStyle="gradient"
+        markerPulse
+      />
     </React.StrictMode>
   );
 }
@@ -148,6 +200,8 @@ function notifyFeedbacksChanged(): void {
   // Debounced: "clear all" sends one DELETE per annotation
   if (notifyTimer) clearTimeout(notifyTimer);
   notifyTimer = setTimeout(() => {
+    // Extension reloaded since this page opened: nobody to notify
+    if (!isExtensionContextValid()) return;
     chrome.runtime
       .sendMessage({ type: "agentation:feedbacks-changed", host: window.location.host })
       .catch(() => {

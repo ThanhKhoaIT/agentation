@@ -152,6 +152,20 @@ function pagePath(url?: string): string | undefined {
   }
 }
 
+const PATH_MAX_CHARS = 28;
+const PATH_HEAD_CHARS = 14;
+const PATH_TAIL_CHARS = 8;
+
+/**
+ * Readable page label: "Homepage" for "/", long paths shortened in the middle
+ * ("/thong-bao-qua…77177.chn") so both the start and the file-like end show.
+ */
+function formatPath(path: string): string {
+  if (path === "/") return "Homepage";
+  if (path.length <= PATH_MAX_CHARS) return path;
+  return `${path.slice(0, PATH_HEAD_CHARS)}…${path.slice(-PATH_TAIL_CHARS)}`;
+}
+
 function statusOf(feedback: Feedback): Status {
   return feedback.status === "acknowledged" ? "acknowledged" : "pending";
 }
@@ -358,10 +372,12 @@ function renderGroup(path: string, url: string | undefined, items: Feedback[], i
   const group = el("section", "group");
   const head = el("div", "group-head");
   if (isCurrent) {
-    head.append(icon("here"), el("span", "group-here", "This page"));
+    const here = el("span", "group-here", formatPath(path));
+    here.title = `This page: ${url ?? path}`;
+    head.append(icon("here"), here);
   } else {
     head.append(icon("external"));
-    const link = el("button", "group-link", path);
+    const link = el("button", "group-link", formatPath(path));
     link.title = url ?? path;
     if (url) link.addEventListener("click", () => openGroupPage(url));
     head.append(link);
@@ -711,6 +727,32 @@ chrome.runtime.onMessage.addListener((message) => {
 setInterval(() => {
   if (document.visibilityState === "visible" && !streamConnected) reload();
 }, POLL_MS);
+
+// Let the background know this window's panel is open, so the toolbar's
+// "Open/close panel" button can close it. Pings keep the worker (and its
+// record of open panels) alive while the panel stays open.
+const PANEL_PING_MS = 25_000;
+const PANEL_RECONNECT_MS = 1_000;
+
+function registerPanel(windowId: number): void {
+  const port = chrome.runtime.connect({ name: `sidepanel:${windowId}` });
+  const ping = setInterval(() => port.postMessage({ type: "agentation:ping" }), PANEL_PING_MS);
+  port.onMessage.addListener((message) => {
+    if (message?.type === "agentation:close-panel") window.close();
+  });
+  // The worker restarted: register again so the toggle keeps working
+  port.onDisconnect.addListener(() => {
+    clearInterval(ping);
+    setTimeout(() => registerPanel(windowId), PANEL_RECONNECT_MS);
+  });
+}
+
+chrome.windows
+  .getCurrent()
+  .then((win) => {
+    if (win.id !== undefined) registerPanel(win.id);
+  })
+  .catch((err) => console.error("[Agentation] Could not register the side panel:", err));
 
 Promise.all([
   initBranding().catch((err) => console.error("[Agentation] Branding failed:", err)),

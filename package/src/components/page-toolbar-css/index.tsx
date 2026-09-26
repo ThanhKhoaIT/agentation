@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -214,6 +214,16 @@ export const COLOR_OPTIONS = [
   { id: "red",     label: "Red",     srgb: "#FF383C", p3: "color(display-p3 1.00 0.22 0.24)" },
 ];
 
+/**
+ * Gradient from a color to its neighbor in COLOR_OPTIONS (wrapping around),
+ * e.g. blue → cyan, red → indigo.
+ */
+export function colorGradient(colorId: string): string {
+  const index = Math.max(0, COLOR_OPTIONS.findIndex((c) => c.id === colorId));
+  const next = COLOR_OPTIONS[(index + 1) % COLOR_OPTIONS.length];
+  return `linear-gradient(135deg, var(--agentation-color-${COLOR_OPTIONS[index].id}), var(--agentation-color-${next.id}))`;
+}
+
 const injectAgentationColorTokens = () => {
   if (typeof document === "undefined") return;
   if (document.getElementById("agentation-color-tokens")) return;
@@ -233,7 +243,13 @@ const injectAgentationColorTokens = () => {
     `),
     `:root {
       ${COLOR_OPTIONS.map(c => `--agentation-color-${c.id}: ${c.srgb};`).join("\n")}
+      ${COLOR_OPTIONS.map(c => `--agentation-gradient-${c.id}: ${colorGradient(c.id)};`).join("\n")}
     }`,
+    ...COLOR_OPTIONS.map(c => `
+      [data-agentation-accent="${c.id}"] {
+        --agentation-gradient-accent: var(--agentation-gradient-${c.id});
+      }
+    `),
     `@supports (color: color(display-p3 0 0 0)) {
       :root {
         ${COLOR_OPTIONS.map(c => `--agentation-color-${c.id}: ${c.p3};`).join("\n")}
@@ -304,6 +320,64 @@ export type DemoAnnotation = {
   selectedText?: string;
 };
 
+/** Toolbar tools that can be turned off (all on by default). */
+export type ToolbarFeatures = {
+  /** Pause animations button and "P" shortcut */
+  pause: boolean;
+  /** Layout mode button and "L" shortcut */
+  layout: boolean;
+  /** Show/hide markers button and "H" shortcut */
+  markers: boolean;
+  /** Copy feedback button and "C" shortcut */
+  copy: boolean;
+  /** Send to webhook button and "S" shortcut */
+  send: boolean;
+  /** Clear all button and "X" shortcut */
+  clear: boolean;
+  /** Settings button and panel */
+  settings: boolean;
+  /** Computed CSS styles in the comment popup */
+  elementStyles: boolean;
+  /** "React Components" row in settings */
+  reactComponents: boolean;
+  /** Version number in settings */
+  version: boolean;
+  /** Webhooks section in settings; when off, webhook URLs saved in settings are not used */
+  webhooks: boolean;
+};
+
+const DEFAULT_TOOLBAR_FEATURES: ToolbarFeatures = {
+  pause: true,
+  layout: true,
+  markers: true,
+  copy: true,
+  send: true,
+  clear: true,
+  settings: true,
+  elementStyles: true,
+  reactComponents: true,
+  version: true,
+  webhooks: true,
+};
+
+// Toolbar buttons that take a fixed slot in the expanded toolbar
+const SLOT_FEATURES = ["pause", "layout", "markers", "copy", "clear", "settings"] as const;
+// One button (34px) plus the gap between buttons (6px)
+const TOOLBAR_BUTTON_SLOT_PX = 40;
+// Expanded widths from styles.module.scss (.expanded / .serverConnected)
+const EXPANDED_WIDTH_PX = 297;
+const EXPANDED_WITH_SEND_WIDTH_PX = 337;
+
+/** Custom button shown in the expanded toolbar, before Exit. */
+export type ToolbarAction = {
+  id: string;
+  /** Tooltip text (also the accessible name) */
+  label: string;
+  /** Icon, ideally 24px and using currentColor */
+  icon: React.ReactNode;
+  onClick: () => void;
+};
+
 export type PageFeedbackToolbarCSSProps = {
   demoAnnotations?: DemoAnnotation[];
   demoDelay?: number;
@@ -338,6 +412,20 @@ export type PageFeedbackToolbarCSSProps = {
    * Annotations with the same id as one of yours are ignored.
    */
   sharedAnnotations?: Annotation[];
+  /**
+   * Turn toolbar tools off, e.g. `{ layout: false, copy: false }` for people
+   * who only leave comments. Unset tools stay on.
+   */
+  features?: Partial<ToolbarFeatures>;
+  /** Extra buttons for the expanded toolbar, shown before Exit. */
+  actions?: ToolbarAction[];
+  /**
+   * "gradient" paints markers (and color swatches) with a gradient from the
+   * chosen color to the next one in the color list. Defaults to "solid".
+   */
+  markerStyle?: "solid" | "gradient";
+  /** Radar-style grey signal rings around markers, to make them easy to spot */
+  markerPulse?: boolean;
 };
 
 /** Alias for PageFeedbackToolbarCSSProps */
@@ -364,7 +452,12 @@ export function PageFeedbackToolbarCSS({
   webhookUrl,
   className: userClassName,
   sharedAnnotations,
+  features,
+  actions,
+  markerStyle = "solid",
+  markerPulse = false,
 }: PageFeedbackToolbarCSSProps = {}) {
+  const gradientMarkers = markerStyle === "gradient";
   const [isActive, setIsActive] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [showMarkers, setShowMarkers] = useState(true);
@@ -434,6 +527,15 @@ export function PageFeedbackToolbarCSS({
   const [cleared, setCleared] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+
+  const feature = useMemo<ToolbarFeatures>(
+    () => ({ ...DEFAULT_TOOLBAR_FEATURES, ...features }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(features ?? {})],
+  );
+  // Net change in toolbar slots: custom actions add, turned-off tools remove
+  const toolbarSlotDelta =
+    (actions?.length ?? 0) - SLOT_FEATURES.filter((key) => !feature[key]).length;
   const [hoveredTargetElement, setHoveredTargetElement] =
     useState<HTMLElement | null>(null);
   const [hoveredTargetElements, setHoveredTargetElements] = useState<
@@ -2590,10 +2692,11 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       payload: Record<string, unknown>,
       force?: boolean,
     ): Promise<boolean> => {
-      // Settings webhookUrl overrides prop
-      const targetUrl = settings.webhookUrl || webhookUrl;
+      // Settings webhookUrl overrides prop (unless the webhooks settings are turned off)
+      const targetUrl = (feature.webhooks && settings.webhookUrl) || webhookUrl;
+      const autoSend = feature.webhooks && settings.webhooksEnabled;
       // Skip if no URL, or if webhooks disabled (unless force is true for manual sends)
-      if (!targetUrl || (!settings.webhooksEnabled && !force)) return false;
+      if (!targetUrl || (!autoSend && !force)) return false;
 
       try {
         const response = await fetch(targetUrl, {
@@ -2613,7 +2716,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
         return false;
       }
     },
-    [webhookUrl, settings.webhookUrl, settings.webhooksEnabled],
+    [webhookUrl, settings.webhookUrl, settings.webhooksEnabled, feature.webhooks],
   );
 
   // Add annotation
@@ -3271,9 +3374,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
         // Content is right-aligned within wrapper via margin-left: auto
         // Calculate content width based on state
         const contentWidth = isActive
-          ? connectionStatus === "connected"
-            ? 297
-            : 257
+          ? (connectionStatus === "connected" ? 297 : 257) +
+            toolbarSlotDelta * TOOLBAR_BUTTON_SLOT_PX
           : 44; // collapsed circle
 
         // Content offset from wrapper left edge
@@ -3310,7 +3412,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [dragStartPos, isDraggingToolbar, isActive, connectionStatus]);
+  }, [dragStartPos, isDraggingToolbar, isActive, connectionStatus, toolbarSlotDelta]);
 
   // Handle toolbar drag start
   const handleToolbarMouseDown = useCallback(
@@ -3359,9 +3461,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       // Content is right-aligned within wrapper via margin-left: auto
       // Calculate content width based on state
       const contentWidth = isActive
-        ? connectionStatus === "connected"
-          ? 297
-          : 257
+        ? (connectionStatus === "connected" ? 297 : 257) +
+          toolbarSlotDelta * TOOLBAR_BUTTON_SLOT_PX
         : 44; // collapsed circle
 
       // Content offset from wrapper left edge
@@ -3389,7 +3490,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
 
     window.addEventListener("resize", constrainPosition);
     return () => window.removeEventListener("resize", constrainPosition);
-  }, [toolbarPosition, isActive, connectionStatus]);
+  }, [toolbarPosition, isActive, connectionStatus, toolbarSlotDelta]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -3445,14 +3546,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       if (isTyping || e.metaKey || e.ctrlKey) return;
 
       // "P" to toggle pause/freeze
-      if (e.key === "p" || e.key === "P") {
+      if (feature.pause && (e.key === "p" || e.key === "P")) {
         e.preventDefault();
         hideTooltipsUntilMouseLeave();
         toggleFreeze();
       }
 
       // "L" to toggle layout mode
-      if (e.key === "l" || e.key === "L") {
+      if (feature.layout && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
         hideTooltipsUntilMouseLeave();
         if (isDrawMode) setIsDrawMode(false);
@@ -3466,7 +3567,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       }
 
       // "H" to toggle marker visibility
-      if (e.key === "h" || e.key === "H") {
+      if (feature.markers && (e.key === "h" || e.key === "H")) {
         if (annotations.length > 0) {
           e.preventDefault();
           hideTooltipsUntilMouseLeave();
@@ -3475,7 +3576,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       }
 
       // "C" to copy output
-      if (e.key === "c" || e.key === "C") {
+      if (feature.copy && (e.key === "c" || e.key === "C")) {
         if (annotations.length > 0 || designPlacements.length > 0 || rearrangeState) {
           e.preventDefault();
           hideTooltipsUntilMouseLeave();
@@ -3484,7 +3585,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       }
 
       // "X" to clear all
-      if (e.key === "x" || e.key === "X") {
+      if (feature.clear && (e.key === "x" || e.key === "X")) {
         if (annotations.length > 0 || designPlacements.length > 0 || rearrangeState) {
           e.preventDefault();
           hideTooltipsUntilMouseLeave();
@@ -3495,7 +3596,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       }
 
       // "S" to send annotations
-      if (e.key === "s" || e.key === "S") {
+      if (feature.send && (e.key === "s" || e.key === "S")) {
         const hasValidWebhook =
           isValidUrl(settings.webhookUrl) || isValidUrl(webhookUrl || "");
         if (
@@ -3529,6 +3630,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
     copyOutput,
     clearAll,
     pendingMultiSelectElements,
+    feature,
   ]);
 
   if (!mounted) return null;
@@ -3555,12 +3657,24 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       return false;
     }
   });
+  const hasSendButton =
+    feature.send &&
+    !settings.webhooksEnabled &&
+    (isValidUrl(settings.webhookUrl) || isValidUrl(webhookUrl || ""));
+  // Expanded toolbar grows/shrinks one slot per custom action / turned-off tool
+  const expandedWidth = toolbarSlotDelta !== 0
+    ? (hasSendButton ? EXPANDED_WITH_SEND_WIDTH_PX : EXPANDED_WIDTH_PX) +
+      toolbarSlotDelta * TOOLBAR_BUTTON_SLOT_PX
+    : undefined;
+
   // Toggle badge: everything open on this page, yours and other people's
   const badgeCount = visibleAnnotations.length + visibleSharedAnnotations.length;
-  const renderSharedMarker = (annotation: Annotation) => (
+  const renderSharedMarker = (annotation: Annotation, index: number) => (
     <SharedMarker
       key={`shared-${annotation.id}`}
       annotation={annotation}
+      index={index}
+      pulse={markerPulse}
       isHovered={!markersExiting && hoveredMarkerId === annotation.id}
       tooltipStyle={getTooltipPosition(annotation)}
       onHoverEnter={(a) => !markersExiting && handleMarkerHover(a)}
@@ -3635,7 +3749,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
       >
         {/* Morphing container */}
         <div
-          className={`${styles.toolbarContainer} ${isActive ? styles.expanded : styles.collapsed} ${showEntranceAnimation ? styles.entrance : ""} ${isToolbarHiding ? styles.hiding : ""} ${!settings.webhooksEnabled && (isValidUrl(settings.webhookUrl) || isValidUrl(webhookUrl || "")) ? styles.serverConnected : ""}`}
+          className={`${styles.toolbarContainer} ${isActive ? styles.expanded : styles.collapsed} ${showEntranceAnimation ? styles.entrance : ""} ${isToolbarHiding ? styles.hiding : ""} ${hasSendButton ? styles.serverConnected : ""}`}
+          style={isActive && expandedWidth !== undefined ? { width: expandedWidth } : undefined}
           onClick={
             !isActive
               ? (e) => {
@@ -3678,6 +3793,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             onMouseEnter={handleControlsMouseEnter}
             onMouseLeave={handleControlsMouseLeave}
           >
+            {feature.pause && (
             <div
               className={`${styles.buttonWrapper} ${
                 toolbarPosition && toolbarPosition.x < 120
@@ -3701,6 +3817,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>P</span>
               </span>
             </div>
+            )}
 
             {/* Draw mode disabled for now
             <div className={styles.buttonWrapper}>
@@ -3723,6 +3840,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             </div>
             */}
 
+            {feature.layout && (
             <div className={styles.buttonWrapper}>
               <button
                 className={`${styles.controlButton} ${!isDarkMode ? styles.light : ""}`}
@@ -3748,7 +3866,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>L</span>
               </span>
             </div>
+            )}
 
+            {feature.markers && (
             <div className={styles.buttonWrapper}>
               <button
                 className={styles.controlButton}
@@ -3766,7 +3886,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>H</span>
               </span>
             </div>
+            )}
 
+            {feature.copy && (
             <div className={styles.buttonWrapper}>
               <button
                 className={`${styles.controlButton} ${copied ? styles.statusShowing : ""}`}
@@ -3787,8 +3909,10 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>C</span>
               </span>
             </div>
+            )}
 
             {/* Send button - only visible when webhook URL is available AND auto-send is off */}
+            {feature.send && (
             <div
               className={`${styles.buttonWrapper} ${styles.sendButtonWrapper} ${isActive && !settings.webhooksEnabled && (isValidUrl(settings.webhookUrl) || isValidUrl(webhookUrl || "")) ? styles.sendButtonVisible : ""}`}
             >
@@ -3827,7 +3951,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>S</span>
               </span>
             </div>
+            )}
 
+            {feature.clear && (
             <div className={styles.buttonWrapper}>
               <button
                 className={styles.controlButton}
@@ -3846,7 +3972,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 <span className={styles.shortcut}>X</span>
               </span>
             </div>
+            )}
 
+            {feature.settings && (
             <div className={styles.buttonWrapper}>
               <button
                 className={styles.controlButton}
@@ -3871,6 +3999,24 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
               )}
               <span className={styles.buttonTooltip}>Settings</span>
             </div>
+            )}
+
+            {actions?.map((action) => (
+              <div key={action.id} className={styles.buttonWrapper}>
+                <button
+                  className={styles.controlButton}
+                  aria-label={action.label}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hideTooltipsUntilMouseLeave();
+                    action.onClick();
+                  }}
+                >
+                  {action.icon}
+                </button>
+                <span className={styles.buttonTooltip}>{action.label}</span>
+              </div>
+            ))}
 
             <div
               className={styles.divider}
@@ -4049,6 +4195,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             settingsPage={settingsPage}
             onSettingsPageChange={setSettingsPage}
             onHideToolbar={hideToolbarTemporarily}
+            features={feature}
+            gradientSwatches={gradientMarkers}
           />
         </div>
       </div>
@@ -4253,6 +4401,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 isEditingAny={!!editingAnnotation}
                 renumberFrom={renumberFrom}
                 markerClickBehavior={settings.markerClickBehavior}
+                gradient={gradientMarkers}
+                pulse={markerPulse}
                 tooltipStyle={getTooltipPosition(annotation)}
                 onHoverEnter={(a) =>
                   !markersExiting &&
@@ -4298,6 +4448,8 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 isEditingAny={!!editingAnnotation}
                 renumberFrom={renumberFrom}
                 markerClickBehavior={settings.markerClickBehavior}
+                gradient={gradientMarkers}
+                pulse={markerPulse}
                 tooltipStyle={getTooltipPosition(annotation)}
                 onHoverEnter={(a) =>
                   !markersExiting &&
@@ -4567,13 +4719,14 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                       y={markerY}
                       isMultiSelect={pendingAnnotation.isMultiSelect}
                       isExiting={pendingExiting}
+                      gradient={gradientMarkers}
                     />
 
                     <AnnotationPopupCSS
                       ref={popupRef}
                       element={pendingAnnotation.element}
                       selectedText={pendingAnnotation.selectedText}
-                      computedStyles={pendingAnnotation.computedStylesObj}
+                      computedStyles={feature.elementStyles ? pendingAnnotation.computedStylesObj : undefined}
                       placeholder={
                         pendingAnnotation.element === "Area selection"
                           ? "What should change in this area?"
@@ -4702,9 +4855,11 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
                 ref={editPopupRef}
                 element={editingAnnotation.element}
                 selectedText={editingAnnotation.selectedText}
-                computedStyles={parseComputedStylesString(
-                  editingAnnotation.computedStyles,
-                )}
+                computedStyles={
+                  feature.elementStyles
+                    ? parseComputedStylesString(editingAnnotation.computedStyles)
+                    : undefined
+                }
                 placeholder="Edit your feedback..."
                 initialValue={editingAnnotation.comment}
                 submitLabel="Save"

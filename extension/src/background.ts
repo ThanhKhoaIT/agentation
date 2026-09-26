@@ -137,6 +137,37 @@ async function refreshAll(): Promise<void> {
   await syncSidePanelAllTabs();
 }
 
+// Side panels currently open, by window. Each open panel keeps a port to us.
+const openPanels = new Map<number, chrome.runtime.Port>();
+
+chrome.runtime.onConnect.addListener((port) => {
+  const match = /^sidepanel:(\d+)$/.exec(port.name);
+  if (!match) return;
+  const windowId = Number(match[1]);
+  openPanels.set(windowId, port);
+  port.onDisconnect.addListener(() => {
+    if (openPanels.get(windowId) === port) openPanels.delete(windowId);
+  });
+});
+
+// Toolbar "Open/close panel" button. sidePanel.open must run right away (no
+// await before it) so Chrome still treats it as a response to the user's click.
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message?.type !== "agentation:toggle-panel") return;
+  const tabId = sender.tab?.id;
+  const windowId = sender.tab?.windowId;
+  if (tabId === undefined || windowId === undefined) return;
+
+  const openPanel = openPanels.get(windowId);
+  if (openPanel) {
+    openPanel.postMessage({ type: "agentation:close-panel" });
+    return;
+  }
+  chrome.sidePanel
+    .open({ tabId })
+    .catch((err) => console.error(`[Agentation] Could not open side panel for tab ${tabId}:`, err));
+});
+
 // loader.ts (our own content script) asks for the toolbar once the site is enabled
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "agentation:inject-toolbar") return;

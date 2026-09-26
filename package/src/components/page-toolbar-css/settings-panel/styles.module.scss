@@ -441,6 +441,7 @@
     inset: 0;
     border-radius: 50%;
     background-color: var(--swatch);
+    background-image: var(--swatch-gradient, none);
     transition:
       opacity 0.2s,
       transform 0.2s;

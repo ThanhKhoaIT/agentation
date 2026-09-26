@@ -31,6 +31,17 @@
   }
 }
 
+@keyframes markerPulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
 @keyframes renumberRoll {
   0% {
     transform: translateX(-40%);
@@ -101,6 +112,38 @@
 
   &.fixed {
     position: fixed;
+  }
+
+  // Radar-style signal rings (grey), two rings half a cycle apart
+  &.pulse::before,
+  &.pulse::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    border: 2px solid rgba(140, 146, 156, 0.75);
+    pointer-events: none;
+    animation: markerPulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    animation-delay: var(--agentation-pulse-delay, 0s);
+  }
+
+  &.pulse::after {
+    animation-delay: calc(var(--agentation-pulse-delay, 0s) + 1.2s);
+  }
+
+  &.pulse.exit::before,
+  &.pulse.exit::after,
+  &.pulse.clearing::before,
+  &.pulse.clearing::after {
+    display: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &.pulse::before,
+    &.pulse::after {
+      display: none;
+    }
   }
 
   // Someone else's annotation: smaller, rainbow, read-only

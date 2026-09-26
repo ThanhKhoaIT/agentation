@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PageFeedbackToolbarCSS } from "./index";
 import { SharedMarker } from "./annotation-marker";
+import { SettingsPanel, type SettingsPanelProps } from "./settings-panel";
 import type { Annotation } from "../../types";
 
 // Mock clipboard API
@@ -99,6 +100,86 @@ describe("PageFeedbackToolbarCSS", () => {
       );
       fireEvent.mouseEnter(container.firstChild as Element);
       expect(onHoverEnter).toHaveBeenCalledWith(shared);
+    });
+  });
+
+  describe("features prop", () => {
+    it("should show every tool by default", () => {
+      render(<PageFeedbackToolbarCSS />);
+      expect(screen.getByText("Copy feedback")).toBeTruthy();
+      expect(screen.getByText("Clear all")).toBeTruthy();
+      expect(screen.getByText("Layout mode")).toBeTruthy();
+    });
+
+    it("should hide tools that are turned off and keep the rest", () => {
+      render(
+        <PageFeedbackToolbarCSS
+          features={{ copy: false, clear: false, layout: false, settings: false }}
+        />
+      );
+      expect(screen.queryByText("Copy feedback")).toBeNull();
+      expect(screen.queryByText("Clear all")).toBeNull();
+      expect(screen.queryByText("Layout mode")).toBeNull();
+      expect(screen.queryByText("Settings")).toBeNull();
+      expect(screen.getByText("Pause animations")).toBeTruthy();
+    });
+  });
+
+  describe("actions prop", () => {
+    it("should render custom actions and call onClick", () => {
+      const onClick = vi.fn();
+      render(
+        <PageFeedbackToolbarCSS
+          actions={[{ id: "open-panel", label: "Open panel", icon: <svg />, onClick }]}
+        />
+      );
+      // Toolbar renders in a portal; getByRole trips jsdom's selector engine on its CSS
+      const button = document.querySelector('button[aria-label="Open panel"]');
+      expect(button).toBeTruthy();
+      fireEvent.click(button as Element);
+      expect(onClick).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("settings panel features", () => {
+    const baseProps: Omit<SettingsPanelProps, "features"> = {
+      settings: {
+        outputDetail: "standard",
+        autoClearAfterCopy: false,
+        annotationColorId: "blue",
+        blockInteractions: true,
+        reactEnabled: true,
+        markerClickBehavior: "edit",
+        webhookUrl: "",
+        webhooksEnabled: false,
+      },
+      onSettingsChange: vi.fn(),
+      isDarkMode: true,
+      onToggleTheme: vi.fn(),
+      isDevMode: true,
+      connectionStatus: "disconnected",
+      isVisible: true,
+      toolbarNearBottom: false,
+      settingsPage: "main",
+      onSettingsPageChange: vi.fn(),
+      onHideToolbar: vi.fn(),
+    };
+
+    it("should show React, version and webhooks by default", () => {
+      render(<SettingsPanel {...baseProps} features={{ reactComponents: true, version: true, webhooks: true }} />);
+      expect(screen.getByText("React Components")).toBeTruthy();
+      expect(screen.getByText("Webhooks")).toBeTruthy();
+      expect(screen.getAllByText("Manage MCP & Webhooks").length).toBeGreaterThan(0);
+    });
+
+    it("should hide React, version and webhooks when turned off", () => {
+      const { container } = render(
+        <SettingsPanel {...baseProps} features={{ reactComponents: false, version: false, webhooks: false }} />
+      );
+      expect(screen.queryByText("React Components")).toBeNull();
+      expect(screen.queryByText("Webhooks")).toBeNull();
+      expect(screen.getAllByText("Manage MCP").length).toBeGreaterThan(0);
+      expect(container.textContent).not.toMatch(/v\d+\.\d+/);
     });
   });
 

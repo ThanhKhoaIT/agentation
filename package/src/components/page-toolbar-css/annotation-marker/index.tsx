@@ -5,6 +5,11 @@ import styles from "./styles.module.scss";
 
 type MarkerClickBehavior = "edit" | "delete";
 
+/** Stagger signal rings so neighboring markers don't pulse in sync */
+function pulseDelay(index: number): React.CSSProperties {
+  return { "--agentation-pulse-delay": `${(index % 4) * 0.4}s` } as React.CSSProperties;
+}
+
 // =============================================================================
 // AnnotationMarker
 // =============================================================================
@@ -23,6 +28,10 @@ type AnnotationMarkerProps = {
   isEditingAny: boolean;
   renumberFrom: number | null;
   markerClickBehavior: MarkerClickBehavior;
+  /** Paint with the accent gradient instead of the solid accent color */
+  gradient?: boolean;
+  /** Radar-style signal rings around the marker */
+  pulse?: boolean;
   tooltipStyle?: React.CSSProperties;
   onHoverEnter: (annotation: Annotation) => void;
   onHoverLeave: () => void;
@@ -43,6 +52,8 @@ export function AnnotationMarker({
   isEditingAny,
   renumberFrom,
   markerClickBehavior,
+  gradient,
+  pulse,
   tooltipStyle,
   onHoverEnter,
   onHoverLeave,
@@ -56,6 +67,9 @@ export function AnnotationMarker({
   const markerColor = isMulti
     ? "var(--agentation-color-green)"
     : "var(--agentation-color-accent)";
+  const markerGradient = isMulti
+    ? "var(--agentation-gradient-green)"
+    : "var(--agentation-gradient-accent)";
 
   const animClass = isExiting
     ? styles.exit
@@ -72,18 +86,21 @@ export function AnnotationMarker({
   return (
     <div
       id={`agentation-marker-${annotation.id}`}
-      className={`${styles.marker} ${isMulti ? styles.multiSelect : ""} ${animClass} ${showDeleteHover ? styles.hovered : ""}`}
+      className={`${styles.marker} ${isMulti ? styles.multiSelect : ""} ${animClass} ${showDeleteHover ? styles.hovered : ""} ${pulse ? styles.pulse : ""}`}
       data-annotation-marker
       ref={forceImportantStyles({
         "background-color": showDeleteHover
           ? "var(--agentation-color-red)"
           : markerColor,
+        // The red delete state stays solid
+        "background-image": gradient && !showDeleteHover ? markerGradient : undefined,
         "border-radius": isMulti ? "6px" : "50%",
       })}
       style={{
         left: `${annotation.x}%`,
         top: annotation.y,
         animationDelay,
+        ...pulseDelay(globalIndex),
       }}
       onMouseEnter={() => onHoverEnter(annotation)}
       onMouseLeave={onHoverLeave}
@@ -145,6 +162,10 @@ export function AnnotationMarker({
 type SharedMarkerProps = {
   annotation: Annotation;
   isHovered: boolean;
+  /** Radar-style signal rings around the marker */
+  pulse?: boolean;
+  /** Position among the shared markers, to stagger the rings */
+  index?: number;
   tooltipStyle?: React.CSSProperties;
   onHoverEnter: (annotation: Annotation) => void;
   onHoverLeave: () => void;
@@ -156,6 +177,8 @@ type SharedMarkerProps = {
 export function SharedMarker({
   annotation,
   isHovered,
+  pulse,
+  index = 0,
   tooltipStyle,
   onHoverEnter,
   onHoverLeave,
@@ -164,7 +187,7 @@ export function SharedMarker({
   return (
     <div
       id={`agentation-shared-marker-${annotation.id}`}
-      className={`${styles.marker} ${styles.shared} ${styles.enter}`}
+      className={`${styles.marker} ${styles.shared} ${styles.enter} ${pulse ? styles.pulse : ""}`}
       data-annotation-marker
       ref={forceImportantStyles({
         "background-color": "var(--agentation-shared-fallback)",
@@ -174,6 +197,7 @@ export function SharedMarker({
       style={{
         left: `${annotation.x}%`,
         top: annotation.y,
+        ...pulseDelay(index),
       }}
       onMouseEnter={() => onHoverEnter(annotation)}
       onMouseLeave={onHoverLeave}
@@ -204,6 +228,7 @@ type PendingMarkerProps = {
   y: number;
   isMultiSelect?: boolean;
   isExiting: boolean;
+  gradient?: boolean;
 };
 
 export function PendingMarker({
@@ -211,6 +236,7 @@ export function PendingMarker({
   y,
   isMultiSelect,
   isExiting,
+  gradient,
 }: PendingMarkerProps) {
   return (
     <div
@@ -220,6 +246,11 @@ export function PendingMarker({
         "background-color": isMultiSelect
           ? "var(--agentation-color-green)"
           : "var(--agentation-color-accent)",
+        "background-image": gradient
+          ? isMultiSelect
+            ? "var(--agentation-gradient-green)"
+            : "var(--agentation-gradient-accent)"
+          : undefined,
         "border-radius": isMultiSelect ? "6px" : "50%",
       })}
       style={{

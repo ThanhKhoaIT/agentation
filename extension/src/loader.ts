@@ -7,7 +7,14 @@
  * work whether or not the toolbar is loaded.
  */
 
-import { KEYS, getCachedAllowlist, getConfig, getSiteSettings, isSiteEnabled } from "./config";
+import {
+  KEYS,
+  getCachedAllowlist,
+  getConfig,
+  getSiteSettings,
+  isExtensionContextValid,
+  isSiteEnabled,
+} from "./config";
 
 type FocusMessage = {
   type: "agentation:focus";
@@ -23,7 +30,7 @@ let toolbarRequested = false;
  * Turning a site off later is handled by the toolbar itself (it hides).
  */
 async function loadToolbarIfEnabled(): Promise<void> {
-  if (toolbarRequested) return;
+  if (toolbarRequested || !isExtensionContextValid()) return;
   const [config, allowlist, sites] = await Promise.all([getConfig(), getCachedAllowlist(), getSiteSettings()]);
   if (!config.endpoint || !isSiteEnabled(allowlist, sites, window.location.host)) return;
 

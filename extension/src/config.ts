@@ -64,6 +64,19 @@ async function readManaged(): Promise<ManagedPolicy> {
   }
 }
 
+/**
+ * False once the extension was reloaded or updated while this page stayed
+ * open: the old content script is orphaned and every chrome.* call throws
+ * "Extension context invalidated".
+ */
+export function isExtensionContextValid(): boolean {
+  try {
+    return !!chrome.runtime?.id;
+  } catch {
+    return false;
+  }
+}
+
 export async function getConfig(): Promise<ExtensionConfig> {
   const managed = await readManaged();
   if (managed.endpoint) {
