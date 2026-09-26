@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Feedbacks</title>
+    <style>
+      :root {
+        --ink: #1b2433;
+        --muted: #667085;
+        --faint: #98a2b3;
+        --line: #e4e8ee;
+        --surface: #f5f7fa;
+        --bg: #ffffff;
+        --accent: #0a7cff;
+        --accent-soft: #e7f1ff;
+        --open: #b86e00;
+        --progress: #0a7cff;
+        --new: #fff6d6;
+        --glow-a: rgba(10, 124, 255, 0.1);
+        --glow-b: rgba(184, 110, 0, 0.07);
+        --ok: #1e8e5a;
+        color-scheme: light;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #e6e9ef;
+          --muted: #9aa3b2;
+          --faint: #6b7483;
+          --line: #2a303b;
+          --surface: #1c2129;
+          --bg: #14181e;
+          --accent: #4c9dff;
+          --accent-soft: #1a2a40;
+          --open: #e0a13a;
+          --progress: #4c9dff;
+          --new: #33301f;
+          --glow-a: rgba(76, 157, 255, 0.12);
+          --glow-b: rgba(224, 161, 58, 0.07);
+          --ok: #4cc38a;
+          color-scheme: dark;
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      html, body { height: 100%; }
+
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        font: 13px/1.45 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--ink);
+        isolation: isolate;
+      }
+
+      /* Soft drifting glow behind the panel */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: -20%;
+        z-index: -1;
+        pointer-events: none;
+        background:
+          radial-gradient(40% 30% at 20% 12%, var(--glow-a), transparent 70%),
+          radial-gradient(35% 28% at 85% 40%, var(--glow-b), transparent 70%),
+          radial-gradient(45% 35% at 35% 88%, var(--glow-a), transparent 70%);
+        animation: drift 24s ease-in-out infinite alternate;
+      }
+
+      @keyframes drift {
+        from { transform: translate3d(0, 0, 0) rotate(0deg); }
+        to { transform: translate3d(5%, 6%, 0) rotate(8deg); }
+      }
+
+      svg.icon {
+        width: 16px;
+        height: 16px;
+        flex: none;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.75;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      button {
+        font: inherit;
+        color: inherit;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+
+      /* Header: which site this is */
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: color-mix(in srgb, var(--bg) 80%, transparent);
+        backdrop-filter: blur(12px);
+        padding: 16px 16px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .site {
+        display: grid;
+        grid-template-columns: 32px 1fr auto;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .favicon {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: var(--surface);
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        color: var(--faint);
+      }
+
+      .favicon img {
+        width: 20px;
+        height: 20px;
+      }
+
+      .site-text { min-width: 0; }
+
+      .site-name {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .page-title {
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .icon-btn {
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+        color: var(--muted);
+        cursor: pointer;
+      }
+
+      .icon-btn:hover { color: var(--ink); background: var(--surface); }
+      .icon-btn:disabled { opacity: 0.4; cursor: default; background: var(--bg); color: var(--muted); }
+      .icon-btn.spinning svg { animation: spin 0.8s linear infinite; }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 14px;
+      }
+
+      .header-actions { display: flex; gap: 6px; }
+
+      .icon-btn.done { color: var(--ok); border-color: currentColor; }
+
+      .people {
+        display: inline-flex;
+        padding: 2px;
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .people button {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border: none;
+        border-radius: 6px;
+        background: none;
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+      }
+
+      .people button[aria-pressed="true"] {
+        background: var(--bg);
+        color: var(--ink);
+        box-shadow: 0 0 0 1px var(--line);
+      }
+
+      .people button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .people svg.icon { width: 14px; height: 14px; }
+
+      /* Feedback list */
+      main {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      /* One group per page of the site */
+      .group-head {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .group-head svg.icon { width: 14px; height: 14px; }
+
+      .group-link {
+        flex: 1;
+        min-width: 0;
+        padding: 0;
+        border: none;
+        background: none;
+        text-align: left;
+        color: var(--accent);
+        font-size: 12px;
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .group-link:hover { text-decoration: underline; }
+
+      .group-here {
+        flex: 1;
+        min-width: 0;
+        color: var(--ink);
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .group-count { font-variant-numeric: tabular-nums; }
+
+      .feedback {
+        position: relative;
+        overflow: hidden;
+        display: grid;
+        grid-template-columns: 16px 1fr;
+        gap: 4px 10px;
+        padding: 14px 16px 14px 14px;
+        border-bottom: 1px solid var(--line);
+        cursor: pointer;
+      }
+
+      .feedback:hover { background: var(--surface); }
+      .feedback.is-new { animation: arrive 2.4s ease-out; }
+
+      @keyframes arrive {
+        from { background: var(--new); }
+        to { background: transparent; }
+      }
+
+      .pin {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        margin: -1px 0 0 -4px;
+        padding: 0;
+        border: none;
+        border-radius: 6px;
+        background: none;
+        cursor: pointer;
+      }
+
+      .pin:hover { background: var(--accent-soft); }
+      .pin.pending { color: var(--open); }
+      .pin.acknowledged { color: var(--progress); }
+
+      .body { min-width: 0; }
+
+      .comment {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      /* Collapsed: two lines of the comment; click to read in full */
+      .feedback:not(.expanded) .comment {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .feedback.expanded { background: var(--surface); box-shadow: inset 3px 0 0 var(--accent); }
+      .feedback:not(.expanded) .details { display: none; }
+      .feedback.expanded .replied { display: none; }
+      .feedback.expanded .reply { background: var(--bg); }
+
+      .details { margin-top: 4px; }
+
+      .replied {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        color: var(--accent);
+        white-space: nowrap;
+      }
+
+      .replied svg.icon { width: 13px; height: 13px; }
+
+      .target {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        min-width: 0;
+      }
+
+      .target-name {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .byline {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 12px;
+        min-width: 0;
+      }
+
+      .author { font-weight: 550; color: var(--ink); white-space: nowrap; }
+
+      .when { color: var(--faint); white-space: nowrap; }
+
+      .tag {
+        padding: 0 6px;
+        border-radius: 4px;
+        background: var(--accent-soft);
+        color: var(--progress);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .thread {
+        margin-top: 10px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .reply {
+        display: grid;
+        grid-template-columns: 16px 1fr;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: var(--surface);
+        font-size: 12.5px;
+      }
+
+      .feedback:hover .reply { background: var(--bg); }
+
+      .reply svg.icon { width: 15px; height: 15px; color: var(--muted); margin-top: 1px; }
+      .reply.agent svg.icon { color: var(--accent); }
+
+      .reply strong {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .reply p {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      /* Empty and error states */
+      .state {
+        display: grid;
+        justify-items: center;
+        gap: 10px;
+        padding: 48px 28px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .state svg.icon {
+        width: 28px;
+        height: 28px;
+        stroke-width: 1.5;
+        color: var(--faint);
+      }
+
+      .state.error svg.icon { color: var(--open); }
+
+      .state p { margin: 0; max-width: 32ch; }
+
+      .state button {
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--bg);
+        cursor: pointer;
+      }
+
+      .state button:hover { background: var(--surface); }
+
+      .hidden { display: none !important; }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21.8883 13.5C21.1645 18.3113 17.013 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C16.1006 2 19.6248 4.46819 21.1679 8"/><path d="M17 8H21.4C21.7314 8 22 7.73137 22 7.4V3"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-here" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+      <symbol id="i-agent" viewBox="0 0 24 24"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 4v4"/><circle cx="12" cy="3.5" r="1"/><path d="M9.5 13h.01M14.5 13h.01"/><path d="M10 16h4"/></symbol>
+      <symbol id="i-reply" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v5"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+      <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5.5 5h13L21 13v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    </svg>
+
+    <header>
+      <div class="site">
+        <div class="favicon" id="favicon"></div>
+        <div class="site-text">
+          <h1 class="site-name" id="site-name">Feedbacks</h1>
+          <div class="page-title" id="page-title"></div>
+        </div>
+        <div class="header-actions">
+          <button class="icon-btn" id="copy" title="Copy all feedback" aria-label="Copy all feedback">
+            <svg class="icon"><use href="#i-copy"/></svg>
+          </button>
+          <button class="icon-btn" id="refresh" title="Refresh" aria-label="Refresh feedbacks">
+            <svg class="icon"><use href="#i-refresh"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="controls" class="controls hidden">
+        <div class="people" role="group" aria-label="Filter by person">
+          <button id="filter-all" aria-pressed="true"><svg class="icon"><use href="#i-users"/></svg>Everyone</button>
+          <button id="filter-mine" aria-pressed="false"><svg class="icon"><use href="#i-user"/></svg>Mine</button>
+        </div>
+      </div>
+    </header>
+
+    <main id="list"></main>
+
+    <script src="sidepanel.js"></script>
+  </body>
+</html>

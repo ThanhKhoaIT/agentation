@@ -1,123 +1,234 @@
+import {
+  ApiError,
+  IncompatibleServerError,
+  KEYS,
+  NotConfiguredError,
+  apiFetch,
+  fetchAllowlist,
+  findAllowedDomain,
+  getBranding,
+  getConfig,
+  getSiteSettings,
+  isHostAllowed,
+  isSiteEnabled,
+  normalizeEndpoint,
+  setSiteEnabled,
+  type Allowlist,
+  type ExtensionConfig,
+} from "./config";
+
+type StatusKind = "loading" | "on" | "paused" | "blocked" | "problem";
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function $(id: string): HTMLElement {
+  return document.getElementById(id) as HTMLElement;
+}
+
+function icon(name: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("class", "icon");
+  svg.setAttribute("aria-hidden", "true");
+  const use = document.createElementNS(SVG_NS, "use");
+  use.setAttribute("href", `#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
-  const customEndpointInput = document.getElementById("custom-endpoint") as HTMLInputElement;
-  const customContainer = document.getElementById("custom-container") as HTMLDivElement;
-  const modeDefault = document.getElementById("mode-default") as HTMLInputElement;
-  const modeCustom = document.getElementById("mode-custom") as HTMLInputElement;
-  
-  const enabledCheckbox = document.getElementById("enabled") as HTMLInputElement;
-  const saveButton = document.getElementById("save");
-  const statusMsg = document.getElementById("status");
-  const domainDisplay = document.getElementById("current-domain");
-  const connectionIndicator = document.getElementById("connection-indicator");
-  const connectionText = document.getElementById("connection-text");
+  const statusEl = $("status");
+  const statusGlyph = $("status-glyph").querySelector("use") as SVGUseElement;
+  const statusTitle = $("status-title");
+  const statusText = $("status-text");
+  const switchEl = $("switch");
+  const enabledCheckbox = $("enabled") as HTMLInputElement;
+  const openPanelButton = $("open-panel") as HTMLButtonElement;
+  const openCount = $("open-count");
+  const retryButton = $("retry") as HTMLButtonElement;
+  const gearButton = $("gear") as HTMLButtonElement;
+  const settingsEl = $("settings");
+  const endpointInput = $("endpoint") as HTMLInputElement;
+  const authInput = $("ingest-auth") as HTMLInputElement;
+  const saveButton = $("save") as HTMLButtonElement;
+  const savedEl = $("saved");
 
-  // Get current tab domain
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const url = new URL(tab.url || "");
-  const currentSiteDomain = url.hostname;
-
-  if (domainDisplay) {
-    domainDisplay.textContent = currentSiteDomain;
+  let host = "";
+  try {
+    const url = new URL(tab?.url || "");
+    if (url.protocol === "http:" || url.protocol === "https:") host = url.host;
+  } catch {
+    // chrome:// or empty tab
   }
 
-  const DEFAULT_DOMAIN = "localhost";
-  const DEFAULT_PORT = "4747";
+  let config: ExtensionConfig = await getConfig();
+  let allowlist: Allowlist | undefined;
 
-  const updateConnectionStatus = async (domain: string, port: string) => {
-    if (!connectionIndicator || !connectionText) return;
-    
-    connectionIndicator.style.background = "#ffcc00"; // yellow while checking
-    connectionText.textContent = "Connecting...";
+  const branding = await getBranding();
+  document.title = branding.name;
 
-    const endpoint = `http://${domain || DEFAULT_DOMAIN}:${port || DEFAULT_PORT}`;
-    
+  // --- Identity: favicon + project name + slogan (no raw domain)
+  const renderPage = () => {
+    const title = tab?.title?.trim();
+    const project = findAllowedDomain(allowlist, host)?.project;
+    $("page-name").textContent = project || title || "This page";
+    $("page-title").textContent = branding.slogan;
+
+    const favicon = $("favicon");
+    if (tab?.favIconUrl && !tab.favIconUrl.startsWith("chrome://")) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = tab.favIconUrl;
+      img.addEventListener("error", () => favicon.replaceChildren(icon("globe")));
+      favicon.replaceChildren(img);
+    } else {
+      favicon.replaceChildren(icon("globe"));
+    }
+  };
+
+  const setStatus = (kind: StatusKind, title: string, text = "") => {
+    statusEl.className = `status ${kind}`;
+    statusGlyph.setAttribute("href", `#i-${kind}`);
+    statusTitle.textContent = title;
+    statusText.textContent = text;
+  };
+
+  const hideActions = () => {
+    switchEl.classList.add("hidden");
+    openPanelButton.classList.add("hidden");
+    retryButton.classList.add("hidden");
+  };
+
+  const openSettings = (open: boolean) => {
+    settingsEl.classList.toggle("hidden", !open);
+    gearButton.setAttribute("aria-expanded", String(open));
+  };
+
+  const loadOpenCount = async () => {
+    openCount.classList.add("hidden");
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      
-      const response = await fetch(`${endpoint}/health`, { signal: controller.signal });
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        connectionIndicator.style.background = "#34c759"; // green
-        connectionText.textContent = "Connected";
-      } else {
-        connectionIndicator.style.background = "#ff3b30"; // red
-        connectionText.textContent = "Error";
+      const res = await apiFetch(
+        config,
+        `/feedbacks?domain=${encodeURIComponent(host)}&status=pending,acknowledged&limit=500`
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { count?: number };
+      const open = data.count ?? 0;
+      if (open > 0) {
+        openCount.textContent = String(open);
+        openCount.title = `${open} to fix`;
+        openCount.classList.remove("hidden");
       }
-    } catch (e) {
-      connectionIndicator.style.background = "#ff3b30"; // red
-      connectionText.textContent = "Disconnected";
+    } catch (err) {
+      // The count is a hint only; the side panel shows the full list and errors
+      console.warn("[Agentation] Could not load feedback count:", err);
     }
   };
 
-  const toggleCustomInput = () => {
-    if (modeCustom.checked) {
-      customContainer.classList.remove("hidden");
+  const renderSite = async () => {
+    hideActions();
+    renderPage();
+
+    if (!host) {
+      setStatus("blocked", "Feedback isn't available here", "Open a website to leave feedback.");
+      return;
+    }
+    if (!isHostAllowed(allowlist, host)) {
+      setStatus("blocked", "Feedback isn't set up for this site", "Ask your tech team to add this site.");
+      return;
+    }
+
+    const sites = await getSiteSettings();
+    const enabled = isSiteEnabled(allowlist, sites, host);
+    enabledCheckbox.checked = enabled;
+    switchEl.classList.remove("hidden");
+    if (enabled) {
+      setStatus(
+        "on",
+        "Feedback is on",
+        "Click the feedback button in the bottom-right corner of the page, then click what you want to comment on."
+      );
     } else {
-      customContainer.classList.add("hidden");
+      setStatus("paused", "Feedback is paused", "Turn it on to show the feedback button on this site.");
+    }
+
+    // Older local servers have no feedback list
+    if (!allowlist?.legacy) {
+      openPanelButton.classList.remove("hidden");
+      loadOpenCount();
     }
   };
 
-  modeDefault.addEventListener("change", toggleCustomInput);
-  modeCustom.addEventListener("change", toggleCustomInput);
-
-  // Load current values
-  chrome.storage.local.get(["globalDomain", "globalPort", currentSiteDomain], (result) => {
-    const globalDomain = result.globalDomain || DEFAULT_DOMAIN;
-    const globalPort = result.globalPort || DEFAULT_PORT;
-    
-    const siteSettings = result[currentSiteDomain] || {};
-    
-    if (siteSettings.domain && (siteSettings.domain !== DEFAULT_DOMAIN || siteSettings.port !== DEFAULT_PORT)) {
-      modeCustom.checked = true;
-      customEndpointInput.value = `${siteSettings.domain}${siteSettings.port ? ":" + siteSettings.port : ""}`;
-      customContainer.classList.remove("hidden");
-    } else {
-      modeDefault.checked = true;
-      customContainer.classList.add("hidden");
+  // Always load the latest list of supported sites when the popup opens
+  const refresh = async () => {
+    hideActions();
+    setStatus("loading", "Checking this site…");
+    config = await getConfig();
+    try {
+      allowlist = await fetchAllowlist(config);
+      await renderSite();
+    } catch (err) {
+      allowlist = undefined;
+      renderPage();
+      if (err instanceof NotConfiguredError) {
+        setStatus(
+          "problem",
+          "Setup needed",
+          config.managed
+            ? "Your organization hasn't finished setting this up. Let your tech team know."
+            : "Add the feedback service address below. Your tech team can give it to you."
+        );
+        if (!config.managed) openSettings(true);
+      } else if (err instanceof IncompatibleServerError) {
+        setStatus("problem", "The feedback service needs an update", "Let your tech team know.");
+      } else if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+        setStatus("problem", "Access was not accepted", "Let your tech team know so they can check your access key.");
+      } else {
+        setStatus("problem", "Can't connect right now", "Check your internet connection and try again.");
+        retryButton.classList.remove("hidden");
+      }
+      console.warn("[Agentation] Allowlist refresh failed:", err);
     }
-    
-    enabledCheckbox.checked = siteSettings.enabled === true;
+  };
 
-    // Initial connection check
-    const effectiveDomain = siteSettings.domain || globalDomain;
-    const effectivePort = siteSettings.port || globalPort;
-    updateConnectionStatus(effectiveDomain, effectivePort);
+  // --- Settings (hidden entirely when managed by the organization)
+  endpointInput.value = config.endpoint ?? "";
+  authInput.value = config.ingestAuth ?? "";
+  if (!config.managed) gearButton.classList.remove("hidden");
+
+  gearButton.addEventListener("click", () => {
+    openSettings(settingsEl.classList.contains("hidden"));
   });
 
-  const showStatus = () => {
-    if (statusMsg) {
-      statusMsg.classList.add("visible");
-      setTimeout(() => {
-        statusMsg.classList.remove("visible");
-      }, 2000);
-    }
-  };
-
-  const saveSettings = () => {
-    let domain = DEFAULT_DOMAIN;
-    let port = DEFAULT_PORT;
-
-    if (modeCustom.checked) {
-      const parts = customEndpointInput.value.split(":");
-      domain = parts[0] || DEFAULT_DOMAIN;
-      port = parts[1] || DEFAULT_PORT;
-    }
-
-    const enabled = enabledCheckbox.checked;
-
-    chrome.storage.local.set({ 
-      [currentSiteDomain]: { domain, port, enabled } 
-    }, () => {
-      showStatus();
-      updateConnectionStatus(domain, port);
+  saveButton.addEventListener("click", async () => {
+    const endpoint = normalizeEndpoint(endpointInput.value) ?? "";
+    await chrome.storage.local.set({
+      [KEYS.endpoint]: endpoint,
+      [KEYS.ingestAuth]: authInput.value.trim(),
     });
-  };
+    endpointInput.value = endpoint;
+    savedEl.classList.add("visible");
+    setTimeout(() => savedEl.classList.remove("visible"), 2000);
+    await refresh();
+  });
 
-  // Save site-specific values
-  saveButton?.addEventListener("click", saveSettings);
+  enabledCheckbox.addEventListener("change", async () => {
+    if (!host) return;
+    await setSiteEnabled(host, enabledCheckbox.checked);
+    await renderSite();
+  });
 
-  // Live update for the switch
-  enabledCheckbox.addEventListener("change", saveSettings);
+  openPanelButton.addEventListener("click", async () => {
+    if (!tab?.windowId || !isHostAllowed(allowlist, host)) return;
+    try {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      window.close();
+    } catch (err) {
+      console.error("[Agentation] Could not open side panel:", err);
+    }
+  });
+
+  retryButton.addEventListener("click", refresh);
+
+  await refresh();
 });

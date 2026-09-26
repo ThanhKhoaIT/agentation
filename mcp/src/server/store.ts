@@ -256,9 +256,10 @@ function createMemoryStore(): AFSStore {
       return annotation;
     },
 
-    listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
+    listAnnotationsByDomain(domain: string, limit: number, statuses?: AnnotationStatus[]): Annotation[] {
       return Array.from(annotations.values())
         .filter((a) => a.sessionId && sessions.get(a.sessionId)?.domain === domain)
+        .filter((a) => !statuses || statuses.length === 0 || statuses.includes(a.status ?? "pending"))
         .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
         .slice(0, limit);
     },
@@ -291,6 +292,13 @@ function createMemoryStore(): AFSStore {
       const existing = domains.get(domain);
       if (!existing) return undefined;
       existing.status = "disabled";
+      return existing;
+    },
+
+    enableDomain(domain: string): Domain | undefined {
+      const existing = domains.get(domain);
+      if (!existing) return undefined;
+      existing.status = "active";
       return existing;
     },
 
@@ -386,8 +394,12 @@ export function deleteAnnotation(id: string): Annotation | undefined {
   return getStore().deleteAnnotation(id);
 }
 
-export function listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
-  return getStore().listAnnotationsByDomain(domain, limit);
+export function listAnnotationsByDomain(
+  domain: string,
+  limit: number,
+  statuses?: AnnotationStatus[]
+): Annotation[] {
+  return getStore().listAnnotationsByDomain(domain, limit, statuses);
 }
 
 export function registerDomains(project: string, domains: string[]): RegisterDomainsResult {
@@ -404,6 +416,10 @@ export function getDomain(domain: string): Domain | undefined {
 
 export function disableDomain(domain: string): Domain | undefined {
   return getStore().disableDomain(domain);
+}
+
+export function enableDomain(domain: string): Domain | undefined {
+  return getStore().enableDomain(domain);
 }
 
 export function getEventsSince(sessionId: string, sequence: number): AFSEvent[] {

@@ -227,14 +227,15 @@ export interface AFSStore {
   getPendingAnnotations(sessionId: string): Annotation[];
   getSessionAnnotations(sessionId: string): Annotation[];
   deleteAnnotation(id: string): Annotation | undefined;
-  /** All annotations (any status) for a domain, newest first */
-  listAnnotationsByDomain(domain: string, limit: number): Annotation[];
+  /** Annotations for a domain, newest first, optionally limited to some statuses */
+  listAnnotationsByDomain(domain: string, limit: number, statuses?: AnnotationStatus[]): Annotation[];
 
   // Domains
   registerDomains(project: string, domains: string[]): RegisterDomainsResult;
   listDomains(): Domain[];
   getDomain(domain: string): Domain | undefined;
   disableDomain(domain: string): Domain | undefined;
+  enableDomain(domain: string): Domain | undefined;
 
   // Events (for replay on reconnect)
   getEventsSince(sessionId: string, sequence: number): AFSEvent[];

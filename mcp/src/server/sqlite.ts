@@ -326,13 +326,6 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
     getAnnotationsBySession: db.prepare("SELECT * FROM annotations WHERE session_id = ? ORDER BY timestamp"),
     getPendingAnnotations: db.prepare("SELECT * FROM annotations WHERE session_id = ? AND status = 'pending' ORDER BY timestamp"),
     deleteAnnotation: db.prepare("DELETE FROM annotations WHERE id = ?"),
-    listAnnotationsByDomain: db.prepare(`
-      SELECT a.* FROM annotations a
-      JOIN sessions s ON s.id = a.session_id
-      WHERE s.domain = ?
-      ORDER BY a.created_at DESC
-      LIMIT ?
-    `),
     updateAnnotation: db.prepare(`
       UPDATE annotations SET
         comment = COALESCE(@comment, comment),
@@ -354,7 +347,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
       VALUES (@domain, @project, 'active', @now, @now)
       ON CONFLICT(domain) DO UPDATE SET last_seen_at = excluded.last_seen_at
     `),
-    disableDomain: db.prepare("UPDATE domains SET status = 'disabled' WHERE domain = ?"),
+    setDomainStatus: db.prepare("UPDATE domains SET status = ? WHERE domain = ?"),
 
     // Events
     insertEvent: db.prepare(`
@@ -614,8 +607,19 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
       return existing;
     },
 
-    listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
-      const rows = stmts.listAnnotationsByDomain.all(domain, limit) as Record<string, unknown>[];
+    listAnnotationsByDomain(domain: string, limit: number, statuses?: AnnotationStatus[]): Annotation[] {
+      const statusClause = statuses && statuses.length > 0
+        ? `AND a.status IN (${statuses.map(() => "?").join(", ")})`
+        : "";
+      const rows = db
+        .prepare(`
+          SELECT a.* FROM annotations a
+          JOIN sessions s ON s.id = a.session_id
+          WHERE s.domain = ? ${statusClause}
+          ORDER BY a.created_at DESC
+          LIMIT ?
+        `)
+        .all(domain, ...(statuses ?? []), limit) as Record<string, unknown>[];
       return rows.map(rowToAnnotation);
     },
 
@@ -650,7 +654,13 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
     },
 
     disableDomain(domain: string): Domain | undefined {
-      const result = stmts.disableDomain.run(domain);
+      const result = stmts.setDomainStatus.run("disabled", domain);
+      if (result.changes === 0) return undefined;
+      return this.getDomain(domain);
+    },
+
+    enableDomain(domain: string): Domain | undefined {
+      const result = stmts.setDomainStatus.run("active", domain);
       if (result.changes === 0) return undefined;
       return this.getDomain(domain);
     },

@@ -28,11 +28,14 @@ import {
   listDomains,
   getDomain,
   disableDomain,
+  enableDomain,
 } from "./store.js";
 import { eventBus } from "./events.js";
 import { authenticate, isAuthEnabled, type Role } from "./auth.js";
 import { domainOfUrl, normalizeDomain, parseDomainList } from "./domains.js";
-import type { Annotation, AFSEvent, ActionRequest, Session } from "../types.js";
+import type { Annotation, AnnotationStatus, AFSEvent, ActionRequest, Session } from "../types.js";
+
+const ANNOTATION_STATUSES: AnnotationStatus[] = ["pending", "acknowledged", "resolved", "dismissed"];
 
 /**
  * Log to stderr so diagnostic output never corrupts the MCP stdio channel.
@@ -703,16 +706,29 @@ function sendSSEEvent(res: ServerResponse, event: AFSEvent): void {
  * Without domain, streams ALL events across all sessions.
  * Useful for agents that need to track feedback across page navigations.
  */
-const globalSseHandler: RouteHandler = async (req, res) => {
+const globalSseHandler: RouteHandler = async (req, res, _params, ctx) => {
   const url = new URL(req.url || "/", "http://localhost");
   const domainFilter = getDomainFilter(url);
+
+  // The extension (side panel) may only stream active allowlisted domains
+  if (ctx.role === "ingest") {
+    if (!domainFilter || domainFilter.length === 0) {
+      return sendError(res, 400, "domains is required");
+    }
+    const blocked = domainFilter.filter((d) => !isDomainAllowed(d));
+    if (blocked.length > 0) {
+      return sendError(res, 403, `Domain is not allowed: ${blocked.join(", ")}`);
+    }
+  }
+
   const domain = domainFilter?.join(",");
   const matchesFilter = (session: Session) => {
     if (domainFilter === undefined) return true;
     const d = sessionDomain(session);
     return !!d && domainFilter.includes(d);
   };
-  const isAgent = url.searchParams.get("agent") === "true";
+  // Only agent credentials count as agent listeners (delivery status, initial sync)
+  const isAgent = ctx.role === "agent" && url.searchParams.get("agent") === "true";
 
   // Set up SSE headers
   res.writeHead(200, {
@@ -791,12 +807,13 @@ const extensionConfigHandler: RouteHandler = async (_req, res) => {
   const domains = listDomains()
     .filter((d) => d.status === "active")
     .map((d) => ({ domain: d.domain, project: d.project }));
-  sendJson(res, 200, { domains });
+  // restricted=false means no auth/allowlist (local dev): every site may be used
+  sendJson(res, 200, { restricted: isAuthEnabled(), domains });
 };
 
 /**
- * GET /feedbacks?domain=x.com[&limit=100] - All annotations of a domain (any status).
- * Used by the extension side panel.
+ * GET /feedbacks?domain=x.com[&limit=100][&status=pending,acknowledged]
+ * Annotations of a domain, newest first. Used by the extension.
  */
 const listFeedbacksHandler: RouteHandler = async (req, res, _params, ctx) => {
   const url = new URL(req.url || "/", "http://localhost");
@@ -809,7 +826,11 @@ const listFeedbacksHandler: RouteHandler = async (req, res, _params, ctx) => {
   }
   const limitParam = parseInt(url.searchParams.get("limit") || "100", 10);
   const limit = Math.min(500, Math.max(1, isNaN(limitParam) ? 100 : limitParam));
-  const annotations = listAnnotationsByDomain(domain, limit);
+  const statuses = (url.searchParams.get("status") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is AnnotationStatus => ANNOTATION_STATUSES.includes(s as AnnotationStatus));
+  const annotations = listAnnotationsByDomain(domain, limit, statuses);
   sendJson(res, 200, { domain, count: annotations.length, annotations });
 };
 
@@ -854,17 +875,19 @@ const listDomainsHandler: RouteHandler = async (_req, res) => {
   sendJson(res, 200, { domains: listDomains() });
 };
 
+function parseDomainParam(raw: string): string | undefined {
+  try {
+    return normalizeDomain(decodeURIComponent(raw));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * DELETE /domains/:domain - Disable a domain. Existing feedback is kept.
  */
 const disableDomainHandler: RouteHandler = async (_req, res, params) => {
-  let raw = params.domain;
-  try {
-    raw = decodeURIComponent(raw);
-  } catch {
-    return sendError(res, 400, "Invalid domain");
-  }
-  const domain = normalizeDomain(raw);
+  const domain = parseDomainParam(params.domain);
   if (!domain) {
     return sendError(res, 400, "Invalid domain");
   }
@@ -874,6 +897,22 @@ const disableDomainHandler: RouteHandler = async (_req, res, params) => {
   }
   log(`[Domains] Disabled ${domain}`);
   sendJson(res, 200, disabled);
+};
+
+/**
+ * POST /domains/:domain/enable - Re-enable a disabled domain.
+ */
+const enableDomainHandler: RouteHandler = async (_req, res, params) => {
+  const domain = parseDomainParam(params.domain);
+  if (!domain) {
+    return sendError(res, 400, "Invalid domain");
+  }
+  const enabled = enableDomain(domain);
+  if (!enabled) {
+    return sendError(res, 404, `Domain not found: ${domain}`);
+  }
+  log(`[Domains] Enabled ${domain}`);
+  sendJson(res, 200, enabled);
 };
 
 /**
@@ -1033,10 +1072,17 @@ const routes: Route[] = [
     paramNames: ["domain"],
   },
   {
+    method: "POST",
+    pattern: /^\/domains\/([^/]+)\/enable$/,
+    handler: enableDomainHandler,
+    paramNames: ["domain"],
+  },
+  {
     method: "GET",
     pattern: /^\/events$/,
     handler: globalSseHandler,
     paramNames: [],
+    roles: ANY_ROLE,
   },
   {
     method: "GET",
@@ -1231,6 +1277,15 @@ export function startHttpServer(port: number, apiKey?: string): void {
     const allowedRoles = match.route.roles ?? ["agent"];
     if (!allowedRoles.includes(role)) {
       return sendError(res, 403, "Forbidden");
+    }
+
+    // Browser pages may only use the ingest credential from an allowed domain.
+    // Extension pages send a chrome-extension:// origin and are not checked.
+    if (role === "ingest") {
+      const origin = req.headers.origin;
+      if (origin?.startsWith("http") && !isDomainAllowed(domainOfUrl(origin))) {
+        return sendError(res, 403, "Origin is not allowed");
+      }
     }
 
     if (role === "ingest" && match.route.scope) {

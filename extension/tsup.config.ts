@@ -6,6 +6,8 @@ export default defineConfig({
   entry: {
     content: "src/content.tsx",
     popup: "src/popup.ts",
+    sidepanel: "src/sidepanel.ts",
+    background: "src/background.ts",
   },
   format: ["iife"], // Extensions need IIFE for content scripts
   outDir: "dist",
@@ -21,25 +23,23 @@ export default defineConfig({
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   async onSuccess() {
-    // Rename content.global.js to content.js
-    if (fs.existsSync("dist/content.global.js")) {
-      fs.renameSync("dist/content.global.js", "dist/content.js");
-      console.log("Renamed content.global.js to content.js");
-    }
-    
-    // Rename popup.global.js to popup.js
-    if (fs.existsSync("dist/popup.global.js")) {
-      fs.renameSync("dist/popup.global.js", "dist/popup.js");
-      console.log("Renamed popup.global.js to popup.js");
+    // Rename <entry>.global.js to <entry>.js
+    for (const name of ["content", "popup", "sidepanel", "background"]) {
+      if (fs.existsSync(`dist/${name}.global.js`)) {
+        fs.renameSync(`dist/${name}.global.js`, `dist/${name}.js`);
+        console.log(`Renamed ${name}.global.js to ${name}.js`);
+      }
     }
     
     // Copy manifest.json to dist
     fs.copyFileSync("manifest.json", "dist/manifest.json");
     console.log("Copied manifest.json to dist");
 
-    // Copy popup.html to dist
-    fs.copyFileSync("src/popup.html", "dist/popup.html");
-    console.log("Copied popup.html to dist");
+    // Copy static files to dist
+    for (const file of ["popup.html", "sidepanel.html", "managed_schema.json"]) {
+      fs.copyFileSync(`src/${file}`, `dist/${file}`);
+      console.log(`Copied ${file} to dist`);
+    }
     
     // Copy icon if it exists
     if (fs.existsSync("src/icon.png")) {

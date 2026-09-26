@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "properties": {
+    "endpoint": {
+      "title": "Feedback server URL",
+      "description": "Base URL of the self-hosted Agentation server, e.g. https://feedback.example.com",
+      "type": "string"
+    },
+    "ingestAuth": {
+      "title": "Ingest credential",
+      "description": "\"user:password\" matching the server's AGENTATION_INGEST_AUTH",
+      "type": "string"
+    },
+    "brandName": {
+      "title": "Extension name",
+      "description": "Name shown in the popup, side panel and toolbar tooltip (default: Agentation)",
+      "type": "string"
+    },
+    "brandSlogan": {
+      "title": "Slogan",
+      "description": "Short line shown under the project name in the popup and side panel (default: Click to add feedbacks), e.g. \"Built by Tech Team\"",
+      "type": "string"
+    }
+  }
+}

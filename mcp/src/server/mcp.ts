@@ -215,6 +215,10 @@ const RemoveDomainSchema = z.object({
   domain: z.string().describe("The domain to remove from the allowlist"),
 });
 
+const EnableDomainSchema = z.object({
+  domain: z.string().describe("The disabled domain to enable again"),
+});
+
 const WatchAnnotationsSchema = z.object({
   sessionId: z.string().optional().describe("Optional session ID to filter. If not provided, watches ALL sessions."),
   batchWindowSeconds: z.number().optional().default(10).describe("Seconds to wait after first annotation before returning batch (default: 10, max: 60)"),
@@ -399,6 +403,22 @@ export const TOOLS = [
         domain: {
           type: "string",
           description: "The domain to remove (e.g. staging.example.com or localhost:3000)",
+        },
+      },
+      required: ["domain"],
+    },
+  },
+  {
+    name: "agentation_enable_domain",
+    description:
+      "Enable a domain that was removed with agentation_remove_domain, so it accepts feedback again. " +
+      "Only do this when the user explicitly asks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        domain: {
+          type: "string",
+          description: "The disabled domain to enable (e.g. staging.example.com or localhost:3000)",
         },
       },
       required: ["domain"],
@@ -820,6 +840,19 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
       try {
         const removed = await httpSend("DELETE", `/domains/${encodeURIComponent(domain)}`);
         return success({ removed: true, domain: removed });
+      } catch (err) {
+        if ((err as Error).message.includes("404")) {
+          return error(`Domain not found: ${domain}`);
+        }
+        throw err;
+      }
+    }
+
+    case "agentation_enable_domain": {
+      const { domain } = EnableDomainSchema.parse(args);
+      try {
+        const enabled = await httpPost(`/domains/${encodeURIComponent(domain)}/enable`, {});
+        return success({ enabled: true, domain: enabled });
       } catch (err) {
         if ((err as Error).message.includes("404")) {
           return error(`Domain not found: ${domain}`);
