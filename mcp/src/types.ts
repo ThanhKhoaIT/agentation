@@ -76,6 +76,8 @@ export type Session = {
   createdAt: string;
   updatedAt?: string;
   projectId?: string;
+  /** URL host (hostname[:port]) the session was created on */
+  domain?: string;
   metadata?: Record<string, unknown>;
 };
 
@@ -83,6 +85,26 @@ export type SessionStatus = "active" | "approved" | "closed";
 
 export type SessionWithAnnotations = Session & {
   annotations: Annotation[];
+};
+
+// -----------------------------------------------------------------------------
+// Domains (allowlist of sites that may submit feedback)
+// -----------------------------------------------------------------------------
+
+export type DomainStatus = "active" | "disabled";
+
+export type Domain = {
+  domain: string;
+  project: string;
+  status: DomainStatus;
+  createdAt: string;
+  lastSeenAt: string;
+};
+
+export type RegisterDomainsResult = {
+  registered: string[];
+  /** Domains skipped because an admin disabled them */
+  disabled: string[];
 };
 
 // -----------------------------------------------------------------------------
@@ -179,7 +201,8 @@ export interface AFSStore {
   getSession(id: string): Session | undefined;
   getSessionWithAnnotations(id: string): SessionWithAnnotations | undefined;
   updateSessionStatus(id: string, status: SessionStatus): Session | undefined;
-  listSessions(): Session[];
+  /** List sessions, optionally limited to the given domains */
+  listSessions(domains?: string[]): Session[];
 
   // Annotations
   addAnnotation(
@@ -204,6 +227,14 @@ export interface AFSStore {
   getPendingAnnotations(sessionId: string): Annotation[];
   getSessionAnnotations(sessionId: string): Annotation[];
   deleteAnnotation(id: string): Annotation | undefined;
+  /** All annotations (any status) for a domain, newest first */
+  listAnnotationsByDomain(domain: string, limit: number): Annotation[];
+
+  // Domains
+  registerDomains(project: string, domains: string[]): RegisterDomainsResult;
+  listDomains(): Domain[];
+  getDomain(domain: string): Domain | undefined;
+  disableDomain(domain: string): Domain | undefined;
 
   // Events (for replay on reconnect)
   getEventsSince(sessionId: string, sequence: number): AFSEvent[];

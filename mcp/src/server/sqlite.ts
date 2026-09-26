@@ -23,8 +23,12 @@ import type {
   UserRole,
   ApiKey,
   UserContext,
+  Domain,
+  DomainStatus,
+  RegisterDomainsResult,
 } from "../types.js";
 import { eventBus } from "./events.js";
+import { domainOfUrl } from "./domains.js";
 
 // -----------------------------------------------------------------------------
 // Database Setup
@@ -115,6 +119,14 @@ function initDatabase(db: Database.Database): void {
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
 
+    CREATE TABLE IF NOT EXISTS domains (
+      domain TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL,
@@ -154,9 +166,39 @@ function rowToSession(row: Record<string, unknown>): Session & { userId?: string
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string | undefined,
     projectId: row.project_id as string | undefined,
+    domain: row.domain as string | undefined,
     metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
     userId: row.user_id as string | undefined,
   };
+}
+
+function rowToDomain(row: Record<string, unknown>): Domain {
+  return {
+    domain: row.domain as string,
+    project: row.project as string,
+    status: row.status as DomainStatus,
+    createdAt: row.created_at as string,
+    lastSeenAt: row.last_seen_at as string,
+  };
+}
+
+/**
+ * Add sessions.domain (indexed) and backfill it from existing session URLs.
+ */
+function migrateSessionDomains(db: Database.Database): void {
+  try { db.exec("ALTER TABLE sessions ADD COLUMN domain TEXT"); } catch {}
+  db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_domain ON sessions(domain)");
+
+  const rows = db.prepare("SELECT id, url FROM sessions WHERE domain IS NULL").all() as Array<{ id: string; url: string }>;
+  if (rows.length === 0) return;
+
+  const update = db.prepare("UPDATE sessions SET domain = ? WHERE id = ?");
+  db.transaction(() => {
+    for (const row of rows) {
+      const domain = domainOfUrl(row.url);
+      if (domain) update.run(domain, row.id);
+    }
+  })();
 }
 
 function rowToOrganization(row: Record<string, unknown>): Organization {
@@ -243,6 +285,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
   // Safe migrations for new columns (no-ops if already exist)
   try { db.exec("ALTER TABLE annotations ADD COLUMN kind TEXT DEFAULT 'feedback'"); } catch {}
   try { db.exec("ALTER TABLE annotations ADD COLUMN extra TEXT"); } catch {}
+  migrateSessionDomains(db);
 
   // Restore event sequence from last event
   const lastEvent = db.prepare("SELECT MAX(sequence) as seq FROM events").get() as { seq: number | null };
@@ -254,8 +297,8 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
   const stmts = {
     // Sessions
     insertSession: db.prepare(`
-      INSERT INTO sessions (id, url, status, created_at, project_id, metadata)
-      VALUES (@id, @url, @status, @createdAt, @projectId, @metadata)
+      INSERT INTO sessions (id, url, status, created_at, project_id, metadata, domain)
+      VALUES (@id, @url, @status, @createdAt, @projectId, @metadata, @domain)
     `),
     getSession: db.prepare("SELECT * FROM sessions WHERE id = ?"),
     updateSessionStatus: db.prepare(`
@@ -283,6 +326,13 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
     getAnnotationsBySession: db.prepare("SELECT * FROM annotations WHERE session_id = ? ORDER BY timestamp"),
     getPendingAnnotations: db.prepare("SELECT * FROM annotations WHERE session_id = ? AND status = 'pending' ORDER BY timestamp"),
     deleteAnnotation: db.prepare("DELETE FROM annotations WHERE id = ?"),
+    listAnnotationsByDomain: db.prepare(`
+      SELECT a.* FROM annotations a
+      JOIN sessions s ON s.id = a.session_id
+      WHERE s.domain = ?
+      ORDER BY a.created_at DESC
+      LIMIT ?
+    `),
     updateAnnotation: db.prepare(`
       UPDATE annotations SET
         comment = COALESCE(@comment, comment),
@@ -295,6 +345,16 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
         severity = COALESCE(@severity, severity)
       WHERE id = @id
     `),
+
+    // Domains
+    getDomain: db.prepare("SELECT * FROM domains WHERE domain = ?"),
+    listDomains: db.prepare("SELECT * FROM domains ORDER BY project, domain"),
+    upsertDomain: db.prepare(`
+      INSERT INTO domains (domain, project, status, created_at, last_seen_at)
+      VALUES (@domain, @project, 'active', @now, @now)
+      ON CONFLICT(domain) DO UPDATE SET last_seen_at = excluded.last_seen_at
+    `),
+    disableDomain: db.prepare("UPDATE domains SET status = 'disabled' WHERE domain = ?"),
 
     // Events
     insertEvent: db.prepare(`
@@ -333,6 +393,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
         status: "active",
         createdAt: new Date().toISOString(),
         projectId,
+        domain: domainOfUrl(url),
       };
 
       stmts.insertSession.run({
@@ -342,6 +403,7 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
         createdAt: session.createdAt,
         projectId: session.projectId ?? null,
         metadata: null,
+        domain: session.domain ?? null,
       });
 
       const event = eventBus.emit("session.created", session.id, session);
@@ -381,8 +443,15 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
       return session;
     },
 
-    listSessions(): Session[] {
-      const rows = stmts.listSessions.all() as Record<string, unknown>[];
+    listSessions(domains?: string[]): Session[] {
+      if (!domains || domains.length === 0) {
+        const rows = stmts.listSessions.all() as Record<string, unknown>[];
+        return rows.map(rowToSession);
+      }
+      const placeholders = domains.map(() => "?").join(", ");
+      const rows = db
+        .prepare(`SELECT * FROM sessions WHERE domain IN (${placeholders}) ORDER BY created_at DESC`)
+        .all(...domains) as Record<string, unknown>[];
       return rows.map(rowToSession);
     },
 
@@ -543,6 +612,47 @@ export function createSQLiteStore(dbPath?: string): AFSStore {
       }
 
       return existing;
+    },
+
+    listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
+      const rows = stmts.listAnnotationsByDomain.all(domain, limit) as Record<string, unknown>[];
+      return rows.map(rowToAnnotation);
+    },
+
+    // Domains
+    registerDomains(project: string, domains: string[]): RegisterDomainsResult {
+      const result: RegisterDomainsResult = { registered: [], disabled: [] };
+      const now = new Date().toISOString();
+      db.transaction(() => {
+        for (const domain of domains) {
+          // Upsert only refreshes last_seen_at: the first project to register a
+          // domain keeps it, and a disabled domain stays disabled.
+          stmts.upsertDomain.run({ domain, project, now });
+          const row = stmts.getDomain.get(domain) as Record<string, unknown>;
+          if (row.status === "disabled") {
+            result.disabled.push(domain);
+          } else {
+            result.registered.push(domain);
+          }
+        }
+      })();
+      return result;
+    },
+
+    listDomains(): Domain[] {
+      const rows = stmts.listDomains.all() as Record<string, unknown>[];
+      return rows.map(rowToDomain);
+    },
+
+    getDomain(domain: string): Domain | undefined {
+      const row = stmts.getDomain.get(domain) as Record<string, unknown> | undefined;
+      return row ? rowToDomain(row) : undefined;
+    },
+
+    disableDomain(domain: string): Domain | undefined {
+      const result = stmts.disableDomain.run(domain);
+      if (result.changes === 0) return undefined;
+      return this.getDomain(domain);
     },
 
     // Events

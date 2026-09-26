@@ -235,12 +235,15 @@ if (command === "init") {
   });
 } else if (command === "server") {
   // Dynamic import to avoid loading server code for other commands
-  import("./server/index.js").then(({ startHttpServer, startMcpServer, setApiKey }) => {
+  import("./server/index.js").then(({ startHttpServer, startMcpServer, setApiKey, setAuth, setProjectDomains, parseDomainList }) => {
     const args = process.argv.slice(3);
     let port = 4747;
     let mcpOnly = false;
     let httpUrl = "http://localhost:4747";
     let apiKeyArg: string | undefined;
+    let authArg: string | undefined;
+    let projectArg: string | undefined;
+    let domainsArg: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--port" && args[i + 1]) {
@@ -264,6 +267,18 @@ if (command === "init") {
         apiKeyArg = args[i + 1];
         i++;
       }
+      if (args[i] === "--auth" && args[i + 1]) {
+        authArg = args[i + 1];
+        i++;
+      }
+      if (args[i] === "--project" && args[i + 1]) {
+        projectArg = args[i + 1];
+        i++;
+      }
+      if (args[i] === "--domains" && args[i + 1]) {
+        domainsArg = args[i + 1];
+        i++;
+      }
     }
 
     // API key from flag or environment variable
@@ -271,6 +286,17 @@ if (command === "init") {
     if (apiKey) {
       setApiKey(apiKey);
     }
+
+    // Basic auth for a self-hosted server. When this process also runs the
+    // HTTP server, its own MCP tools fall back to the agent credential.
+    const auth = authArg || process.env.AGENTATION_AUTH || (!mcpOnly ? process.env.AGENTATION_AGENT_AUTH : undefined);
+    if (auth) {
+      setAuth(auth);
+    }
+
+    const project = (projectArg || process.env.AGENTATION_PROJECT)?.trim() || undefined;
+    const domains = parseDomainList(domainsArg || process.env.AGENTATION_DOMAINS);
+    setProjectDomains(project, domains);
 
     if (!mcpOnly) {
       startHttpServer(port, apiKey);
@@ -295,6 +321,11 @@ Server Options:
   --mcp-only         Skip HTTP server, only run MCP on stdio
   --http-url <url>   HTTP server URL for MCP to fetch from
   --api-key <key>    API key for cloud storage (or set AGENTATION_API_KEY env var)
+  --auth <user:pass> Basic auth for a self-hosted server (or AGENTATION_AUTH)
+  --project <name>   Project name for domain registration (or AGENTATION_PROJECT)
+  --domains <list>   Comma-separated domains of this project (or AGENTATION_DOMAINS).
+                     Registered on the server allowlist at startup; tools only
+                     return feedback from these domains.
 
 Commands:
   init      Guided setup that configures Claude Code to use the MCP server.
@@ -320,6 +351,16 @@ Examples:
 
   # Or using environment variable
   AGENTATION_API_KEY=ag_xxx agentation-mcp server
+
+  # Connect to a self-hosted server for one project
+  AGENTATION_AUTH=agent:secret agentation-mcp server --mcp-only \\
+    --http-url https://feedback.example.com \\
+    --project my-app --domains my-app.com,staging.my-app.com,localhost:3000
+
+Self-hosted server environment:
+  AGENTATION_AGENT_AUTH   "user:pass" for MCP clients (full access)
+  AGENTATION_INGEST_AUTH  "user:pass" for the browser extension
+  Setting either enables auth and the domain allowlist.
 `);
 } else {
   console.error(`Unknown command: ${command}`);

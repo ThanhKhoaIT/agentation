@@ -23,9 +23,16 @@ import {
   getPendingAnnotations,
   addThreadMessage,
   getEventsSince,
+  listAnnotationsByDomain,
+  registerDomains,
+  listDomains,
+  getDomain,
+  disableDomain,
 } from "./store.js";
 import { eventBus } from "./events.js";
-import type { Annotation, AFSEvent, ActionRequest } from "../types.js";
+import { authenticate, isAuthEnabled, type Role } from "./auth.js";
+import { domainOfUrl, normalizeDomain, parseDomainList } from "./domains.js";
+import type { Annotation, AFSEvent, ActionRequest, Session } from "../types.js";
 
 /**
  * Log to stderr so diagnostic output never corrupts the MCP stdio channel.
@@ -171,14 +178,25 @@ function sendWebhooks(actionRequest: ActionRequest): void {
 // Request Helpers
 // -----------------------------------------------------------------------------
 
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
+
 /**
  * Parse JSON body from request.
  */
 async function parseBody<T>(req: IncomingMessage): Promise<T> {
   return new Promise((resolve, reject) => {
     let body = "";
-    req.on("data", (chunk) => (body += chunk));
+    let tooLarge = false;
+    req.on("data", (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > MAX_BODY_BYTES) {
+        tooLarge = true;
+        reject(new Error("Payload too large"));
+      }
+    });
     req.on("end", () => {
+      if (tooLarge) return;
       try {
         resolve(body ? JSON.parse(body) : {});
       } catch {
@@ -193,12 +211,7 @@ async function parseBody<T>(req: IncomingMessage): Promise<T> {
  * Send JSON response.
  */
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  });
+  res.writeHead(status, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
 }
 
@@ -210,17 +223,82 @@ function sendError(res: ServerResponse, status: number, message: string): void {
 }
 
 /**
+ * Set CORS headers for every response.
+ *
+ * Without auth (local dev) any origin is allowed. With auth enabled, only
+ * pages on an active allowlisted domain may call the API from the browser.
+ * Extension pages (popup, side panel) use host_permissions and bypass CORS.
+ */
+function applyCors(req: IncomingMessage, res: ServerResponse): void {
+  const origin = req.headers.origin;
+  if (!isAuthEnabled()) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && isDomainAllowed(domainOfUrl(origin))) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Accept, Authorization, Mcp-Session-Id, Last-Event-ID, X-Agentation-Reporter"
+  );
+  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+}
+
+/**
  * Handle CORS preflight.
  */
 function handleCors(res: ServerResponse): void {
-  res.writeHead(204, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Session-Id",
-    "Access-Control-Expose-Headers": "Mcp-Session-Id",
-    "Access-Control-Max-Age": "86400",
-  });
+  res.writeHead(204, { "Access-Control-Max-Age": "86400" });
   res.end();
+}
+
+// -----------------------------------------------------------------------------
+// Domain Allowlist
+// -----------------------------------------------------------------------------
+
+/**
+ * Whether a domain may submit feedback. Without auth every domain is allowed.
+ */
+function isDomainAllowed(domain: string | undefined): boolean {
+  if (!isAuthEnabled()) return true;
+  if (!domain) return false;
+  return getDomain(domain)?.status === "active";
+}
+
+/**
+ * Read the ?domains= (or legacy ?domain=) filter.
+ * Returns undefined when no filter was requested.
+ */
+function getDomainFilter(url: URL): string[] | undefined {
+  const raw = [url.searchParams.get("domains"), url.searchParams.get("domain")]
+    .filter((v): v is string => v !== null);
+  if (raw.length === 0) return undefined;
+  return parseDomainList(raw.join(","));
+}
+
+function listSessionsFor(filter: string[] | undefined): Session[] {
+  if (filter === undefined) return listSessions();
+  // A filter with no valid domains matches nothing (never "everything")
+  if (filter.length === 0) return [];
+  return listSessions(filter);
+}
+
+function sessionDomain(session: Session): string | undefined {
+  return session.domain ?? domainOfUrl(session.url);
+}
+
+const REPORTER_HEADER = "x-agentation-reporter";
+
+/**
+ * Read the reporter email injected by the browser extension.
+ */
+function readReporter(req: IncomingMessage): string | undefined {
+  const value = req.headers[REPORTER_HEADER];
+  if (typeof value !== "string") return undefined;
+  const email = value.trim().toLowerCase();
+  if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+$/.test(email)) return undefined;
+  return email;
 }
 
 // -----------------------------------------------------------------------------
@@ -311,10 +389,13 @@ async function proxyToCloud(
 // Route Handlers
 // -----------------------------------------------------------------------------
 
+type RouteContext = { role: Role };
+
 type RouteHandler = (
   req: IncomingMessage,
   res: ServerResponse,
-  params: Record<string, string>
+  params: Record<string, string>,
+  ctx: RouteContext
 ) => Promise<void>;
 
 /**
@@ -328,6 +409,18 @@ const createSessionHandler: RouteHandler = async (req, res) => {
       return sendError(res, 400, "url is required");
     }
 
+    if (isAuthEnabled()) {
+      const domain = domainOfUrl(body.url);
+      if (!isDomainAllowed(domain)) {
+        return sendError(res, 403, `Domain is not allowed: ${domain ?? "invalid url"}`);
+      }
+      const origin = req.headers.origin;
+      const originDomain = origin?.startsWith("http") ? domainOfUrl(origin) : undefined;
+      if (originDomain && originDomain !== domain) {
+        return sendError(res, 403, "Origin does not match session url");
+      }
+    }
+
     const session = createSession(body.url, body.projectId);
     sendJson(res, 201, session);
   } catch (err) {
@@ -338,8 +431,9 @@ const createSessionHandler: RouteHandler = async (req, res) => {
 /**
  * GET /sessions - List all sessions.
  */
-const listSessionsHandler: RouteHandler = async (_req, res) => {
-  const sessions = listSessions();
+const listSessionsHandler: RouteHandler = async (req, res) => {
+  const url = new URL(req.url || "/", "http://localhost");
+  const sessions = listSessionsFor(getDomainFilter(url));
   sendJson(res, 200, sessions);
 };
 
@@ -367,7 +461,10 @@ const addAnnotationHandler: RouteHandler = async (req, res, params) => {
       return sendError(res, 400, "comment, element, and elementPath are required");
     }
 
-    const annotation = addAnnotation(params.id, body);
+    // With auth enabled, the author always comes from the extension-injected
+    // header, never from the request body.
+    const data = isAuthEnabled() ? { ...body, authorId: readReporter(req) } : body;
+    const annotation = addAnnotation(params.id, data);
 
     if (!annotation) {
       return sendError(res, 404, "Session not found");
@@ -436,8 +533,9 @@ const getPendingHandler: RouteHandler = async (_req, res, params) => {
 /**
  * GET /pending - Get all pending annotations across all sessions.
  */
-const getAllPendingHandler: RouteHandler = async (_req, res) => {
-  const sessions = listSessions();
+const getAllPendingHandler: RouteHandler = async (req, res) => {
+  const url = new URL(req.url || "/", "http://localhost");
+  const sessions = listSessionsFor(getDomainFilter(url));
   const allPending = sessions.flatMap((session) => getPendingAnnotations(session.id));
   sendJson(res, 200, { count: allPending.length, annotations: allPending });
 };
@@ -546,7 +644,6 @@ const sseHandler: RouteHandler = async (req, res, params) => {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
   });
 
   // Track this connection
@@ -608,7 +705,13 @@ function sendSSEEvent(res: ServerResponse, event: AFSEvent): void {
  */
 const globalSseHandler: RouteHandler = async (req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
-  const domain = url.searchParams.get("domain");
+  const domainFilter = getDomainFilter(url);
+  const domain = domainFilter?.join(",");
+  const matchesFilter = (session: Session) => {
+    if (domainFilter === undefined) return true;
+    const d = sessionDomain(session);
+    return !!d && domainFilter.includes(d);
+  };
   const isAgent = url.searchParams.get("agent") === "true";
 
   // Set up SSE headers
@@ -616,7 +719,6 @@ const globalSseHandler: RouteHandler = async (req, res) => {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     Connection: "keep-alive",
-    "Access-Control-Allow-Origin": "*",
   });
 
   // Track this connection
@@ -631,14 +733,9 @@ const globalSseHandler: RouteHandler = async (req, res) => {
   // Send all pending annotations on connect (initial sync for agents)
   if (isAgent) {
     let syncCount = 0;
-    const sessions = listSessions();
+    const sessions = listSessionsFor(domainFilter);
     for (const session of sessions) {
       try {
-        // If domain is specified, filter by it; otherwise include all sessions
-        if (domain) {
-          const sessionHost = new URL(session.url).host;
-          if (sessionHost !== domain) continue;
-        }
         const pending = getPendingAnnotations(session.id);
         for (const annotation of pending) {
           // Send as annotation.created events so agents see existing annotations
@@ -662,21 +759,14 @@ const globalSseHandler: RouteHandler = async (req, res) => {
 
   // Subscribe to all events, optionally filter by domain
   const unsubscribe = eventBus.subscribe((event: AFSEvent) => {
-    if (!domain) {
+    if (domainFilter === undefined) {
       // No domain filter -- stream all events
       sendSSEEvent(res, event);
       return;
     }
     const session = getSession(event.sessionId);
-    if (session) {
-      try {
-        const sessionHost = new URL(session.url).host;
-        if (sessionHost === domain) {
-          sendSSEEvent(res, event);
-        }
-      } catch {
-        // Invalid URL, skip
-      }
+    if (session && matchesFilter(session)) {
+      sendSSEEvent(res, event);
     }
   });
 
@@ -695,18 +785,104 @@ const globalSseHandler: RouteHandler = async (req, res) => {
 };
 
 /**
+ * GET /extension - Config for the browser extension (active domains).
+ */
+const extensionConfigHandler: RouteHandler = async (_req, res) => {
+  const domains = listDomains()
+    .filter((d) => d.status === "active")
+    .map((d) => ({ domain: d.domain, project: d.project }));
+  sendJson(res, 200, { domains });
+};
+
+/**
+ * GET /feedbacks?domain=x.com[&limit=100] - All annotations of a domain (any status).
+ * Used by the extension side panel.
+ */
+const listFeedbacksHandler: RouteHandler = async (req, res, _params, ctx) => {
+  const url = new URL(req.url || "/", "http://localhost");
+  const domain = normalizeDomain(url.searchParams.get("domain") ?? "");
+  if (!domain) {
+    return sendError(res, 400, "domain is required");
+  }
+  if (ctx.role === "ingest" && !isDomainAllowed(domain)) {
+    return sendError(res, 403, `Domain is not allowed: ${domain}`);
+  }
+  const limitParam = parseInt(url.searchParams.get("limit") || "100", 10);
+  const limit = Math.min(500, Math.max(1, isNaN(limitParam) ? 100 : limitParam));
+  const annotations = listAnnotationsByDomain(domain, limit);
+  sendJson(res, 200, { domain, count: annotations.length, annotations });
+};
+
+/**
+ * PUT /domains - Register a project's domains (called by MCP on startup).
+ * Idempotent. Disabled domains stay disabled.
+ */
+const registerDomainsHandler: RouteHandler = async (req, res) => {
+  try {
+    const body = await parseBody<{ project?: unknown; domains?: unknown }>(req);
+    const project = typeof body.project === "string" ? body.project.trim() : "";
+    if (!project || project.length > 100) {
+      return sendError(res, 400, "project is required (max 100 chars)");
+    }
+    if (!Array.isArray(body.domains) || body.domains.length === 0) {
+      return sendError(res, 400, "domains must be a non-empty array");
+    }
+
+    const valid: string[] = [];
+    const invalid: string[] = [];
+    for (const raw of body.domains) {
+      const domain = typeof raw === "string" ? normalizeDomain(raw) : undefined;
+      if (domain) valid.push(domain);
+      else invalid.push(String(raw));
+    }
+    if (valid.length === 0) {
+      return sendError(res, 400, `No valid domains: ${invalid.join(", ")}`);
+    }
+
+    const result = registerDomains(project, [...new Set(valid)]);
+    log(`[Domains] ${project}: registered ${result.registered.length}, disabled ${result.disabled.length}`);
+    sendJson(res, 200, { project, ...result, invalid });
+  } catch (err) {
+    sendError(res, 400, (err as Error).message);
+  }
+};
+
+/**
+ * GET /domains - List all registered domains.
+ */
+const listDomainsHandler: RouteHandler = async (_req, res) => {
+  sendJson(res, 200, { domains: listDomains() });
+};
+
+/**
+ * DELETE /domains/:domain - Disable a domain. Existing feedback is kept.
+ */
+const disableDomainHandler: RouteHandler = async (_req, res, params) => {
+  let raw = params.domain;
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    return sendError(res, 400, "Invalid domain");
+  }
+  const domain = normalizeDomain(raw);
+  if (!domain) {
+    return sendError(res, 400, "Invalid domain");
+  }
+  const disabled = disableDomain(domain);
+  if (!disabled) {
+    return sendError(res, 404, `Domain not found: ${domain}`);
+  }
+  log(`[Domains] Disabled ${domain}`);
+  sendJson(res, 200, disabled);
+};
+
+/**
  * Handle MCP protocol requests at /mcp endpoint.
  * Supports POST (requests), GET (SSE stream), and DELETE (session cleanup).
  */
 async function handleMcp(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const method = req.method || "GET";
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-
-  // Add CORS headers to all responses
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Accept, Mcp-Session-Id");
-  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 
   // POST: Handle JSON-RPC requests
   if (method === "POST") {
@@ -812,9 +988,50 @@ type Route = {
   pattern: RegExp;
   handler: RouteHandler;
   paramNames: string[];
+  /** Roles allowed to call this route (default: agent only) */
+  roles?: Role[];
+  /**
+   * For ingest callers: which resource `params.id` refers to. The resource's
+   * session must belong to an active allowlisted domain.
+   */
+  scope?: "session" | "annotation";
 };
 
+const ANY_ROLE: Role[] = ["agent", "ingest"];
+
 const routes: Route[] = [
+  {
+    method: "GET",
+    pattern: /^\/extension$/,
+    handler: extensionConfigHandler,
+    paramNames: [],
+    roles: ANY_ROLE,
+  },
+  {
+    method: "GET",
+    pattern: /^\/feedbacks$/,
+    handler: listFeedbacksHandler,
+    paramNames: [],
+    roles: ANY_ROLE,
+  },
+  {
+    method: "GET",
+    pattern: /^\/domains$/,
+    handler: listDomainsHandler,
+    paramNames: [],
+  },
+  {
+    method: "PUT",
+    pattern: /^\/domains$/,
+    handler: registerDomainsHandler,
+    paramNames: [],
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/domains\/([^/]+)$/,
+    handler: disableDomainHandler,
+    paramNames: ["domain"],
+  },
   {
     method: "GET",
     pattern: /^\/events$/,
@@ -838,60 +1055,79 @@ const routes: Route[] = [
     pattern: /^\/sessions$/,
     handler: createSessionHandler,
     paramNames: [],
+    roles: ANY_ROLE,
   },
   {
     method: "GET",
     pattern: /^\/sessions\/([^/]+)$/,
     handler: getSessionHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "session",
   },
   {
     method: "GET",
     pattern: /^\/sessions\/([^/]+)\/events$/,
     handler: sseHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "session",
   },
   {
     method: "GET",
     pattern: /^\/sessions\/([^/]+)\/pending$/,
     handler: getPendingHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "session",
   },
   {
     method: "POST",
     pattern: /^\/sessions\/([^/]+)\/action$/,
     handler: requestActionHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "session",
   },
   {
     method: "POST",
     pattern: /^\/sessions\/([^/]+)\/annotations$/,
     handler: addAnnotationHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "session",
   },
   {
     method: "PATCH",
     pattern: /^\/annotations\/([^/]+)$/,
     handler: updateAnnotationHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "annotation",
   },
   {
     method: "GET",
     pattern: /^\/annotations\/([^/]+)$/,
     handler: getAnnotationHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "annotation",
   },
   {
     method: "DELETE",
     pattern: /^\/annotations\/([^/]+)$/,
     handler: deleteAnnotationHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "annotation",
   },
   {
     method: "POST",
     pattern: /^\/annotations\/([^/]+)\/thread$/,
     handler: addThreadHandler,
     paramNames: ["id"],
+    roles: ANY_ROLE,
+    scope: "annotation",
   },
 ];
 
@@ -901,7 +1137,7 @@ const routes: Route[] = [
 function matchRoute(
   method: string,
   pathname: string
-): { handler: RouteHandler; params: Record<string, string> } | null {
+): { route: Route; handler: RouteHandler; params: Record<string, string> } | null {
   for (const route of routes) {
     if (route.method !== method) continue;
 
@@ -911,7 +1147,7 @@ function matchRoute(
       route.paramNames.forEach((name, i) => {
         params[name] = match[i + 1];
       });
-      return { handler: route.handler, params };
+      return { route, handler: route.handler, params };
     }
   }
   return null;
@@ -942,14 +1178,23 @@ export function startHttpServer(port: number, apiKey?: string): void {
       log(`[HTTP] ${method} ${pathname}`);
     }
 
+    applyCors(req, res);
+
     // Handle CORS preflight
     if (method === "OPTIONS") {
       return handleCors(res);
     }
 
-    // Health check (always local)
+    // Health check (always local, no auth)
     if (pathname === "/health" && method === "GET") {
       return sendJson(res, 200, { status: "ok", mode: isCloudMode() ? "cloud" : "local" });
+    }
+
+    // Everything else requires credentials when auth is enabled.
+    // No WWW-Authenticate header: it would make browsers show a login dialog.
+    const role = authenticate(req);
+    if (!role) {
+      return sendError(res, 401, "Unauthorized");
     }
 
     // Status endpoint (always local)
@@ -966,6 +1211,9 @@ export function startHttpServer(port: number, apiKey?: string): void {
 
     // MCP protocol endpoint (always local - allows Claude Code to connect)
     if (pathname === "/mcp") {
+      if (role !== "agent") {
+        return sendError(res, 403, "Forbidden");
+      }
       return handleMcp(req, res);
     }
 
@@ -980,8 +1228,25 @@ export function startHttpServer(port: number, apiKey?: string): void {
       return sendError(res, 404, "Not found");
     }
 
+    const allowedRoles = match.route.roles ?? ["agent"];
+    if (!allowedRoles.includes(role)) {
+      return sendError(res, 403, "Forbidden");
+    }
+
+    if (role === "ingest" && match.route.scope) {
+      const sessionId =
+        match.route.scope === "session" ? match.params.id : getAnnotation(match.params.id)?.sessionId;
+      const session = sessionId ? getSession(sessionId) : undefined;
+      if (!session) {
+        return sendError(res, 404, match.route.scope === "session" ? "Session not found" : "Annotation not found");
+      }
+      if (!isDomainAllowed(sessionDomain(session))) {
+        return sendError(res, 403, "Domain is not allowed");
+      }
+    }
+
     try {
-      await match.handler(req, res, match.params);
+      await match.handler(req, res, match.params, { role });
     } catch (err) {
       console.error("Request error:", err);
       sendError(res, 500, "Internal server error");

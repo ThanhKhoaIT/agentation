@@ -14,6 +14,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { ActionRequest } from "../types.js";
+import { basicAuthHeader } from "./auth.js";
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -21,6 +22,10 @@ import type { ActionRequest } from "../types.js";
 
 let httpBaseUrl = "http://localhost:4747";
 let apiKey: string | undefined;
+let authHeader: string | undefined;
+let project: string | undefined;
+let domains: string[] = [];
+let domainRegistration: Promise<void> | undefined;
 
 /**
  * Set the HTTP server URL that this MCP server will fetch from.
@@ -36,15 +41,47 @@ export function setApiKey(key: string): void {
   apiKey = key;
 }
 
+/**
+ * Set Basic auth credentials ("user:password") for a self-hosted server.
+ */
+export function setAuth(credential: string): void {
+  authHeader = basicAuthHeader(credential);
+}
+
+/**
+ * Scope this MCP server to a project and its domains. On startup the domains
+ * are registered on the server (allowlist), and every read is filtered to them.
+ */
+export function setProjectDomains(projectName: string | undefined, projectDomains: string[]): void {
+  project = projectName;
+  domains = projectDomains;
+}
+
+function withAuth(headers: Record<string, string>): Record<string, string> {
+  if (apiKey) {
+    headers["x-api-key"] = apiKey;
+  }
+  if (authHeader) {
+    headers["Authorization"] = authHeader;
+  }
+  return headers;
+}
+
+/**
+ * Append the project's domain filter to a list/stream path.
+ */
+function withDomains(path: string): string {
+  if (domains.length === 0) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}domains=${encodeURIComponent(domains.join(","))}`;
+}
+
 // -----------------------------------------------------------------------------
 // HTTP Client
 // -----------------------------------------------------------------------------
 
 async function httpGet<T>(path: string): Promise<T> {
-  const headers: Record<string, string> = {};
-  if (apiKey) {
-    headers["x-api-key"] = apiKey;
-  }
+  const headers = withAuth({});
   const res = await fetch(`${httpBaseUrl}${path}`, { headers });
   if (!res.ok) {
     const body = await res.text();
@@ -54,10 +91,7 @@ async function httpGet<T>(path: string): Promise<T> {
 }
 
 async function httpPatch<T>(path: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) {
-    headers["x-api-key"] = apiKey;
-  }
+  const headers = withAuth({ "Content-Type": "application/json" });
   const res = await fetch(`${httpBaseUrl}${path}`, {
     method: "PATCH",
     headers,
@@ -71,10 +105,7 @@ async function httpPatch<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function httpPost<T>(path: string, body: unknown): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (apiKey) {
-    headers["x-api-key"] = apiKey;
-  }
+  const headers = withAuth({ "Content-Type": "application/json" });
   const res = await fetch(`${httpBaseUrl}${path}`, {
     method: "POST",
     headers,
@@ -85,6 +116,68 @@ async function httpPost<T>(path: string, body: unknown): Promise<T> {
     throw new Error(`HTTP ${res.status}: ${text}`);
   }
   return res.json() as Promise<T>;
+}
+
+async function httpSend<T>(method: "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const headers = withAuth(body === undefined ? {} : { "Content-Type": "application/json" });
+  const res = await fetch(`${httpBaseUrl}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// -----------------------------------------------------------------------------
+// Domain Registration
+// -----------------------------------------------------------------------------
+
+type RegisterDomainsResponse = {
+  project: string;
+  registered: string[];
+  disabled: string[];
+  invalid: string[];
+};
+
+/**
+ * Register the project's domains on the server allowlist. Runs once; if the
+ * server was unreachable it is retried on the next tool call.
+ */
+function registerProjectDomains(): Promise<void> {
+  if (!domainRegistration) {
+    domainRegistration = doRegisterProjectDomains().then((ok) => {
+      if (!ok) domainRegistration = undefined;
+    });
+  }
+  return domainRegistration;
+}
+
+async function doRegisterProjectDomains(): Promise<boolean> {
+  if (domains.length === 0) return true;
+  if (!project) {
+    console.error("[MCP] --domains is set but --project is missing — skipping domain registration");
+    return true;
+  }
+  try {
+    const result = await httpSend<RegisterDomainsResponse>("PUT", "/domains", { project, domains });
+    console.error(`[MCP] Registered domains for ${project}: ${result.registered.join(", ") || "(none)"}`);
+    if (result.disabled.length > 0) {
+      console.error(
+        `[MCP] Domains disabled by an admin (remove them from your MCP config): ${result.disabled.join(", ")}`
+      );
+    }
+    if (result.invalid.length > 0) {
+      console.error(`[MCP] Invalid domains ignored: ${result.invalid.join(", ")}`);
+    }
+    return true;
+  } catch (err) {
+    console.error(`[MCP] Domain registration failed, will retry on next tool call: ${(err as Error).message}`);
+    return false;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -116,6 +209,10 @@ const ReplySchema = z.object({
 
 const GetSessionSchema = z.object({
   sessionId: z.string().describe("The session ID to get"),
+});
+
+const RemoveDomainSchema = z.object({
+  domain: z.string().describe("The domain to remove from the allowlist"),
 });
 
 const WatchAnnotationsSchema = z.object({
@@ -279,6 +376,34 @@ export const TOOLS = [
       required: [],
     },
   },
+  {
+    name: "agentation_list_domains",
+    description:
+      "List all domains registered on the feedback server allowlist, with their project, status " +
+      "(active/disabled), and when a developer's MCP config last registered them. Use before removing a domain.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "agentation_remove_domain",
+    description:
+      "Remove a domain from the feedback server allowlist. The domain is disabled (not deleted): " +
+      "it stops accepting new feedback, existing feedback is kept, and MCP configs that still list it " +
+      "will not re-enable it. Only do this when the user explicitly asks.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        domain: {
+          type: "string",
+          description: "The domain to remove (e.g. staging.example.com or localhost:3000)",
+        },
+      },
+      required: ["domain"],
+    },
+  },
 ];
 
 // -----------------------------------------------------------------------------
@@ -417,12 +542,9 @@ function watchForAnnotations(
     // Connect to SSE endpoint with agent=true to be counted as an agent listener
     const sseUrl = sessionId
       ? `${httpBaseUrl}/sessions/${sessionId}/events?agent=true`
-      : `${httpBaseUrl}/events?agent=true`;
+      : `${httpBaseUrl}${withDomains("/events?agent=true")}`;
 
-    const sseHeaders: Record<string, string> = { Accept: "text/event-stream" };
-    if (apiKey) {
-      sseHeaders["x-api-key"] = apiKey;
-    }
+    const sseHeaders = withAuth({ Accept: "text/event-stream" });
 
     fetch(sseUrl, {
       signal: controller.signal,
@@ -523,9 +645,11 @@ function watchForAnnotations(
 }
 
 export async function handleTool(name: string, args: unknown): Promise<ToolResult> {
+  await registerProjectDomains();
+
   switch (name) {
     case "agentation_list_sessions": {
-      const sessions = await httpGet<Session[]>("/sessions");
+      const sessions = await httpGet<Session[]>(withDomains("/sessions"));
       return success({
         sessions: sessions.map((s) => ({
           id: s.id,
@@ -559,7 +683,7 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
     }
 
     case "agentation_get_all_pending": {
-      const response = await httpGet<PendingResponse>("/pending");
+      const response = await httpGet<PendingResponse>(withDomains("/pending"));
       return success({
         count: response.count,
         annotations: response.annotations.map(mapAnnotationForMcp),
@@ -647,7 +771,7 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
       // This catches annotations that arrived while the caller was busy processing
       // the previous batch (when watch_annotations wasn't running).
       try {
-        const pendingPath = sessionId ? `/sessions/${sessionId}/pending` : "/pending";
+        const pendingPath = sessionId ? `/sessions/${sessionId}/pending` : withDomains("/pending");
         const pending = await httpGet<PendingResponse>(pendingPath);
         if (pending.count > 0) {
           const sessions = [...new Set(pending.annotations.map((a) => a.sessionId))];
@@ -683,6 +807,24 @@ export async function handleTool(name: string, args: unknown): Promise<ToolResul
           });
         case "error":
           return error(result.message);
+      }
+    }
+
+    case "agentation_list_domains": {
+      const response = await httpGet<{ domains: unknown[] }>("/domains");
+      return success(response);
+    }
+
+    case "agentation_remove_domain": {
+      const { domain } = RemoveDomainSchema.parse(args);
+      try {
+        const removed = await httpSend("DELETE", `/domains/${encodeURIComponent(domain)}`);
+        return success({ removed: true, domain: removed });
+      } catch (err) {
+        if ((err as Error).message.includes("404")) {
+          return error(`Domain not found: ${domain}`);
+        }
+        throw err;
       }
     }
 
@@ -736,9 +878,14 @@ export async function startMcpServer(baseUrl?: string): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
+  // Register allowlist domains in the background; tools retry if this fails
+  registerProjectDomains();
+
   // Log startup message with connection details
   const isRemote = httpBaseUrl.startsWith("https://") || (!httpBaseUrl.includes("localhost") && !httpBaseUrl.includes("127.0.0.1"));
-  if (isRemote && apiKey) {
+  if (isRemote && authHeader) {
+    console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, auth: configured, project: ${project ?? "-"}, domains: ${domains.join(", ") || "all"})`);
+  } else if (isRemote && apiKey) {
     console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, API key: configured)`);
   } else if (isRemote) {
     console.error(`[MCP] Agentation MCP server started on stdio (Remote: ${httpBaseUrl}, API key: not configured)`);

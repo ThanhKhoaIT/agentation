@@ -18,8 +18,11 @@ import type {
   Annotation,
   AnnotationStatus,
   ThreadMessage,
+  Domain,
+  RegisterDomainsResult,
 } from "../types.js";
 import { eventBus } from "./events.js";
+import { domainOfUrl } from "./domains.js";
 
 // -----------------------------------------------------------------------------
 // Store Singleton
@@ -67,6 +70,7 @@ function initializeStore(): AFSStore {
 function createMemoryStore(): AFSStore {
   const sessions = new Map<string, Session>();
   const annotations = new Map<string, Annotation>();
+  const domains = new Map<string, Domain>();
   const events: AFSEvent[] = [];
 
   function generateId(): string {
@@ -81,6 +85,7 @@ function createMemoryStore(): AFSStore {
         status: "active",
         createdAt: new Date().toISOString(),
         projectId,
+        domain: domainOfUrl(url),
       };
       sessions.set(session.id, session);
 
@@ -122,8 +127,10 @@ function createMemoryStore(): AFSStore {
       return session;
     },
 
-    listSessions(): Session[] {
-      return Array.from(sessions.values());
+    listSessions(domainFilter?: string[]): Session[] {
+      const all = Array.from(sessions.values());
+      if (!domainFilter || domainFilter.length === 0) return all;
+      return all.filter((s) => !!s.domain && domainFilter.includes(s.domain));
     },
 
     addAnnotation(
@@ -249,6 +256,44 @@ function createMemoryStore(): AFSStore {
       return annotation;
     },
 
+    listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
+      return Array.from(annotations.values())
+        .filter((a) => a.sessionId && sessions.get(a.sessionId)?.domain === domain)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
+        .slice(0, limit);
+    },
+
+    registerDomains(project: string, list: string[]): RegisterDomainsResult {
+      const result: RegisterDomainsResult = { registered: [], disabled: [] };
+      const now = new Date().toISOString();
+      for (const domain of list) {
+        const existing = domains.get(domain);
+        if (existing) {
+          existing.lastSeenAt = now;
+        } else {
+          domains.set(domain, { domain, project, status: "active", createdAt: now, lastSeenAt: now });
+        }
+        const status = domains.get(domain)!.status;
+        (status === "disabled" ? result.disabled : result.registered).push(domain);
+      }
+      return result;
+    },
+
+    listDomains(): Domain[] {
+      return Array.from(domains.values());
+    },
+
+    getDomain(domain: string): Domain | undefined {
+      return domains.get(domain);
+    },
+
+    disableDomain(domain: string): Domain | undefined {
+      const existing = domains.get(domain);
+      if (!existing) return undefined;
+      existing.status = "disabled";
+      return existing;
+    },
+
     getEventsSince(sessionId: string, sequence: number): AFSEvent[] {
       return events.filter(
         (e) => e.sessionId === sessionId && e.sequence > sequence
@@ -258,6 +303,7 @@ function createMemoryStore(): AFSStore {
     close(): void {
       sessions.clear();
       annotations.clear();
+      domains.clear();
       events.length = 0;
     },
   };
@@ -290,8 +336,8 @@ export function updateSessionStatus(id: string, status: SessionStatus): Session 
   return getStore().updateSessionStatus(id, status);
 }
 
-export function listSessions(): Session[] {
-  return getStore().listSessions();
+export function listSessions(domains?: string[]): Session[] {
+  return getStore().listSessions(domains);
 }
 
 export function addAnnotation(
@@ -338,6 +384,26 @@ export function getSessionAnnotations(sessionId: string): Annotation[] {
 
 export function deleteAnnotation(id: string): Annotation | undefined {
   return getStore().deleteAnnotation(id);
+}
+
+export function listAnnotationsByDomain(domain: string, limit: number): Annotation[] {
+  return getStore().listAnnotationsByDomain(domain, limit);
+}
+
+export function registerDomains(project: string, domains: string[]): RegisterDomainsResult {
+  return getStore().registerDomains(project, domains);
+}
+
+export function listDomains(): Domain[] {
+  return getStore().listDomains();
+}
+
+export function getDomain(domain: string): Domain | undefined {
+  return getStore().getDomain(domain);
+}
+
+export function disableDomain(domain: string): Domain | undefined {
+  return getStore().disableDomain(domain);
 }
 
 export function getEventsSince(sessionId: string, sequence: number): AFSEvent[] {
