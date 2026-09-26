@@ -5,9 +5,16 @@
 
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Agentation, type Annotation, type ToolbarAction, type ToolbarFeatures } from "agentation";
+import {
+  Agentation,
+  type Annotation,
+  type ToolbarAction,
+  type ToolbarBrand,
+  type ToolbarFeatures,
+} from "agentation";
 import {
   KEYS,
+  getBranding,
   getCachedAllowlist,
   getConfig,
   getSiteSettings,
@@ -145,12 +152,20 @@ function App() {
   const [endpoint, setEndpoint] = useState<string | undefined>();
   const [isEnabled, setIsEnabled] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [brand, setBrand] = useState<ToolbarBrand | undefined>();
 
   useEffect(() => {
     const host = window.location.host;
 
     const load = async () => {
-      const [config, allowlist, sites] = await Promise.all([getConfig(), getCachedAllowlist(), getSiteSettings()]);
+      const [config, allowlist, sites, branding] = await Promise.all([
+        getConfig(),
+        getCachedAllowlist(),
+        getSiteSettings(),
+        getBranding(),
+      ]);
+      // Same name and slogan as the popup and side panel (managed policy)
+      setBrand({ name: branding.name, slogan: branding.slogan });
       activeEndpoint = config.endpoint;
       setEndpoint(config.endpoint);
       setIsEnabled(!!config.endpoint && isSiteEnabled(allowlist, sites, host));
@@ -189,6 +204,7 @@ function App() {
         actions={TOOLBAR_ACTIONS}
         markerStyle="gradient"
         markerPulse
+        brand={brand}
       />
     </React.StrictMode>
   );

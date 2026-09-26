@@ -368,6 +368,15 @@ const TOOLBAR_BUTTON_SLOT_PX = 40;
 const EXPANDED_WIDTH_PX = 297;
 const EXPANDED_WITH_SEND_WIDTH_PX = 337;
 
+/** Your own name shown at the top of settings instead of the Agentation logo. */
+export type ToolbarBrand = {
+  name: string;
+  /** Short line shown next to the name */
+  slogan?: string;
+  /** Link for the name; omitted means no link */
+  href?: string;
+};
+
 /** Custom button shown in the expanded toolbar, before Exit. */
 export type ToolbarAction = {
   id: string;
@@ -426,6 +435,8 @@ export type PageFeedbackToolbarCSSProps = {
   markerStyle?: "solid" | "gradient";
   /** Radar-style grey signal rings around markers, to make them easy to spot */
   markerPulse?: boolean;
+  /** Replace the Agentation logo at the top of settings with your own name */
+  brand?: ToolbarBrand;
 };
 
 /** Alias for PageFeedbackToolbarCSSProps */
@@ -456,6 +467,7 @@ export function PageFeedbackToolbarCSS({
   actions,
   markerStyle = "solid",
   markerPulse = false,
+  brand,
 }: PageFeedbackToolbarCSSProps = {}) {
   const gradientMarkers = markerStyle === "gradient";
   const [isActive, setIsActive] = useState(false);
@@ -4197,6 +4209,7 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             onHideToolbar={hideToolbarTemporarily}
             features={feature}
             gradientSwatches={gradientMarkers}
+            brand={brand}
           />
         </div>
       </div>

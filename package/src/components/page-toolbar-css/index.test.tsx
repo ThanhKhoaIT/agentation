@@ -172,6 +172,19 @@ describe("PageFeedbackToolbarCSS", () => {
       expect(screen.getAllByText("Manage MCP & Webhooks").length).toBeGreaterThan(0);
     });
 
+    it("should show a custom brand name and slogan instead of the logo", () => {
+      render(
+        <SettingsPanel
+          {...baseProps}
+          features={{ reactComponents: true, version: true, webhooks: true }}
+          brand={{ name: "LixAgentation", slogan: "Built by Tech Team" }}
+        />
+      );
+      expect(screen.getByText("LixAgentation")).toBeTruthy();
+      expect(screen.getByText("Built by Tech Team")).toBeTruthy();
+      expect(document.querySelector('a[href="https://agentation.com"]')).toBeNull();
+    });
+
     it("should hide React, version and webhooks when turned off", () => {
       const { container } = render(
         <SettingsPanel {...baseProps} features={{ reactComponents: false, version: false, webhooks: false }} />
