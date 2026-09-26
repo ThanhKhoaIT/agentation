@@ -87,7 +87,7 @@ import type { Annotation } from "../../types";
 import styles from "./styles.module.scss";
 import { generateOutput } from "../../utils/generate-output";
 import { forceImportantStyles } from "../../utils/force-important-styles";
-import { AnnotationMarker, ExitingMarker, PendingMarker } from "./annotation-marker";
+import { AnnotationMarker, ExitingMarker, PendingMarker, SharedMarker } from "./annotation-marker";
 import { SettingsPanel } from "./settings-panel";
 
 // Outline border/background are forced inline with !important so host page CSS can't hide them
@@ -332,6 +332,12 @@ export type PageFeedbackToolbarCSSProps = {
   webhookUrl?: string;
   /** Custom class name applied to the toolbar container. Use to adjust positioning or z-index. */
   className?: string;
+  /**
+   * Read-only annotations left by other people (e.g. teammates on a shared server).
+   * Shown as markers next to your own; those with a `url` only on that page.
+   * Annotations with the same id as one of yours are ignored.
+   */
+  sharedAnnotations?: Annotation[];
 };
 
 /** Alias for PageFeedbackToolbarCSSProps */
@@ -357,6 +363,7 @@ export function PageFeedbackToolbarCSS({
   onSessionCreated,
   webhookUrl,
   className: userClassName,
+  sharedAnnotations,
 }: PageFeedbackToolbarCSSProps = {}) {
   const [isActive, setIsActive] = useState(false);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -3533,9 +3540,32 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
   const visibleAnnotations = annotations.filter(
     (a) => !exitingMarkers.has(a.id) && a.kind !== "placement" && a.kind !== "rearrange",
   );
-  const hasVisibleAnnotations = visibleAnnotations.length > 0;
   const exitingAnnotationsList = annotations.filter((a) =>
     exitingMarkers.has(a.id),
+  );
+
+  // Other people's annotations for this page (own ones take precedence)
+  const ownAnnotationIds = new Set(annotations.map((a) => a.id));
+  const visibleSharedAnnotations = (sharedAnnotations ?? []).filter((a) => {
+    if (ownAnnotationIds.has(a.id) || a.kind === "placement" || a.kind === "rearrange") return false;
+    if (!a.url) return true;
+    try {
+      return new URL(a.url).pathname === pathname;
+    } catch {
+      return false;
+    }
+  });
+  // Toggle badge: everything open on this page, yours and other people's
+  const badgeCount = visibleAnnotations.length + visibleSharedAnnotations.length;
+  const renderSharedMarker = (annotation: Annotation) => (
+    <SharedMarker
+      key={`shared-${annotation.id}`}
+      annotation={annotation}
+      isHovered={!markersExiting && hoveredMarkerId === annotation.id}
+      tooltipStyle={getTooltipPosition(annotation)}
+      onHoverEnter={(a) => !markersExiting && handleMarkerHover(a)}
+      onHoverLeave={() => handleMarkerHover(null)}
+    />
   );
 
   // Helper function to calculate viewport-aware tooltip positioning
@@ -3629,11 +3659,11 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
             className={`${styles.toggleContent} ${!isActive ? styles.visible : styles.hidden}`}
           >
             <IconListSparkle size={24} />
-            {hasVisibleAnnotations && (
+            {badgeCount > 0 && (
               <span
                 className={`${styles.badge} ${isActive ? styles.fadeOut : ""} ${showEntranceAnimation ? styles.entrance : ""}`}
               >
-                {visibleAnnotations.length}
+                {badgeCount}
               </span>
             )}
           </div>
@@ -4243,6 +4273,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
           exitingAnnotationsList
             .filter((a) => !a.isFixed)
             .map((a) => <ExitingMarker key={a.id} annotation={a} />)}
+        {markersVisible &&
+          !markersExiting &&
+          visibleSharedAnnotations.filter((a) => !a.isFixed).map(renderSharedMarker)}
       </div>
 
       {/* Fixed markers layer */}
@@ -4285,6 +4318,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
           exitingAnnotationsList
             .filter((a) => a.isFixed)
             .map((a) => <ExitingMarker key={a.id} annotation={a} fixed />)}
+        {markersVisible &&
+          !markersExiting &&
+          visibleSharedAnnotations.filter((a) => a.isFixed).map(renderSharedMarker)}
       </div>
 
 
@@ -4349,9 +4385,9 @@ const [settings, setSettings] = useState<ToolbarSettings>(() => {
           {hoveredMarkerId &&
             !pendingAnnotation &&
             (() => {
-              const hoveredAnnotation = annotations.find(
-                (a) => a.id === hoveredMarkerId,
-              );
+              const hoveredAnnotation =
+                annotations.find((a) => a.id === hoveredMarkerId) ??
+                visibleSharedAnnotations.find((a) => a.id === hoveredMarkerId);
               if (!hoveredAnnotation?.boundingBox) return null;
 
               // Render individual element boxes if available (cmd+shift+click multi-select)

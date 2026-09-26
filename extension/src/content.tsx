@@ -5,14 +5,98 @@
 
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Agentation } from "agentation";
+import { Agentation, type Annotation } from "agentation";
 import { KEYS, getCachedAllowlist, getConfig, getSiteSettings, isSiteEnabled } from "./config";
 
 const ROOT_ID = "agentation-extension-root";
 const NOTIFY_DEBOUNCE_MS = 300;
+const SHARED_REFRESH_DEBOUNCE_MS = 300;
+// While the live stream is down: refresh this often, then try the stream again
+const SHARED_RETRY_MS = 30_000;
 
 // Endpoint the toolbar currently syncs to (read by the fetch watcher)
 let activeEndpoint: string | undefined;
+
+/**
+ * Open feedback from everyone on this site, kept current over the server's
+ * event stream. Shown on the page as read-only markers next to your own.
+ * Requests get credentials from the background's declarativeNetRequest rule.
+ */
+function useSharedAnnotations(endpoint: string | undefined, enabled: boolean): Annotation[] {
+  const [shared, setShared] = useState<Annotation[]>([]);
+
+  useEffect(() => {
+    if (!enabled || !endpoint) {
+      setShared([]);
+      return;
+    }
+    const domain = encodeURIComponent(window.location.host);
+    const controller = new AbortController();
+    const { signal } = controller;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const refresh = async () => {
+      try {
+        const res = await fetch(`${endpoint}/feedbacks?domain=${domain}&status=pending,acknowledged&limit=500`, { signal });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const data = (await res.json()) as { annotations?: Annotation[] };
+        setShared(data.annotations ?? []);
+      } catch (err) {
+        if (!signal.aborted) console.debug("[Agentation] Could not load team feedback:", err);
+      }
+    };
+
+    const scheduleRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(refresh, SHARED_REFRESH_DEBOUNCE_MS);
+    };
+
+    const stream = async () => {
+      try {
+        const res = await fetch(`${endpoint}/events?domains=${domain}`, {
+          signal,
+          headers: { Accept: "text/event-stream" },
+        });
+        if (!res.ok || !res.body) throw new Error(`Stream returned ${res.status}`);
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            if (!line.startsWith("event: ")) continue;
+            const type = line.slice(7).trim();
+            if (type.startsWith("annotation.") || type === "thread.message") scheduleRefresh();
+          }
+        }
+        throw new Error("Stream closed by server");
+      } catch (err) {
+        if (signal.aborted) return;
+        // Stream unavailable (e.g. older server): refresh now and retry later
+        console.debug("[Agentation] Team feedback stream unavailable, retrying later:", err);
+        retryTimer = setTimeout(() => {
+          refresh();
+          stream();
+        }, SHARED_RETRY_MS);
+      }
+    };
+
+    refresh();
+    stream();
+    return () => {
+      controller.abort();
+      if (refreshTimer) clearTimeout(refreshTimer);
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [endpoint, enabled]);
+
+  return shared;
+}
 
 function App() {
   const [endpoint, setEndpoint] = useState<string | undefined>();
@@ -47,11 +131,13 @@ function App() {
     return () => chrome.storage.onChanged.removeListener(listener);
   }, []);
 
+  const sharedAnnotations = useSharedAnnotations(endpoint, isLoaded && isEnabled);
+
   if (!isLoaded || !isEnabled) return null;
 
   return (
     <React.StrictMode>
-      <Agentation endpoint={endpoint} />
+      <Agentation endpoint={endpoint} sharedAnnotations={sharedAnnotations} />
     </React.StrictMode>
   );
 }

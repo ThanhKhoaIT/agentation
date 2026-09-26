@@ -1,5 +1,5 @@
 import { Annotation } from "../../../types";
-import { IconEdit, IconPlus, IconXmark } from "../../icons";
+import { IconChatEllipsis, IconEdit, IconPlus, IconXmark } from "../../icons";
 import { forceImportantStyles } from "../../../utils/force-important-styles";
 import styles from "./styles.module.scss";
 
@@ -132,6 +132,63 @@ export function AnnotationMarker({
               ` "${annotation.selectedText.slice(0, 30)}${annotation.selectedText.length > 30 ? "..." : ""}"`}
           </span>
           <span className={styles.markerNote}>{annotation.comment}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =============================================================================
+// SharedMarker
+// =============================================================================
+
+type SharedMarkerProps = {
+  annotation: Annotation;
+  isHovered: boolean;
+  tooltipStyle?: React.CSSProperties;
+  onHoverEnter: (annotation: Annotation) => void;
+  onHoverLeave: () => void;
+};
+
+/**
+ * Read-only marker for an annotation someone else left on this page.
+ */
+export function SharedMarker({
+  annotation,
+  isHovered,
+  tooltipStyle,
+  onHoverEnter,
+  onHoverLeave,
+}: SharedMarkerProps) {
+  const author = annotation.authorId?.split("@")[0];
+  return (
+    <div
+      id={`agentation-shared-marker-${annotation.id}`}
+      className={`${styles.marker} ${styles.shared} ${styles.enter}`}
+      data-annotation-marker
+      ref={forceImportantStyles({
+        "background-color": "var(--agentation-shared-fallback)",
+        "background-image": "var(--agentation-shared-gradient)",
+        "border-radius": "50%",
+      })}
+      style={{
+        left: `${annotation.x}%`,
+        top: annotation.y,
+      }}
+      onMouseEnter={() => onHoverEnter(annotation)}
+      onMouseLeave={onHoverLeave}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <IconChatEllipsis size={14} />
+
+      {isHovered && (
+        <div
+          className={`${styles.markerTooltip} ${styles.enter}`}
+          style={tooltipStyle}
+        >
+          <span className={styles.markerQuote}>{annotation.element}</span>
+          <span className={styles.markerNote}>{annotation.comment}</span>
+          {author && <span className={styles.markerAuthor}>{author}</span>}
         </div>
       )}
     </div>

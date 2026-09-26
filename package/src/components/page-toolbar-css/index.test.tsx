@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PageFeedbackToolbarCSS } from "./index";
+import { SharedMarker } from "./annotation-marker";
 import type { Annotation } from "../../types";
 
 // Mock clipboard API
@@ -62,6 +63,42 @@ describe("PageFeedbackToolbarCSS", () => {
       expect(() =>
         render(<PageFeedbackToolbarCSS copyToClipboard={true} />)
       ).not.toThrow();
+    });
+  });
+
+  describe("sharedAnnotations prop", () => {
+    const shared: Annotation = {
+      id: "shared-1",
+      x: 50,
+      y: 100,
+      comment: "Button is hidden on mobile",
+      element: "button",
+      elementPath: "body > button",
+      timestamp: 1,
+      authorId: "linh@example.com",
+    };
+
+    it("should accept sharedAnnotations without errors", () => {
+      expect(() => render(<PageFeedbackToolbarCSS sharedAnnotations={[shared]} />)).not.toThrow();
+    });
+
+    it("should show comment and author only while hovered", () => {
+      const props = { annotation: shared, onHoverEnter: vi.fn(), onHoverLeave: vi.fn() };
+      const { rerender } = render(<SharedMarker {...props} isHovered={false} />);
+      expect(screen.queryByText("Button is hidden on mobile")).toBeNull();
+
+      rerender(<SharedMarker {...props} isHovered />);
+      expect(screen.getByText("Button is hidden on mobile")).toBeTruthy();
+      expect(screen.getByText("linh")).toBeTruthy();
+    });
+
+    it("should report hover so the toolbar can show the tooltip", () => {
+      const onHoverEnter = vi.fn();
+      const { container } = render(
+        <SharedMarker annotation={shared} isHovered={false} onHoverEnter={onHoverEnter} onHoverLeave={vi.fn()} />
+      );
+      fireEvent.mouseEnter(container.firstChild as Element);
+      expect(onHoverEnter).toHaveBeenCalledWith(shared);
     });
   });
 

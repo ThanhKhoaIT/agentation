@@ -103,6 +103,20 @@
     position: fixed;
   }
 
+  // Someone else's annotation: smaller, rainbow, read-only
+  &.shared {
+    --agentation-shared-fallback: #a66bff;
+    --agentation-shared-gradient: linear-gradient(135deg, #ff5f6d 0%, #ffb347 25%, #3ddc84 50%, #3aa8ff 75%, #a66bff 100%);
+    width: 20px;
+    height: 20px;
+    cursor: default;
+
+    // Keep the white icon readable on the light parts of the gradient
+    svg {
+      filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.45));
+    }
+  }
+
   &.multiSelect {
     background-color: var(--agentation-color-green);
     width: 26px;
@@ -180,6 +194,17 @@
   padding-bottom: 2px;
 }
 
+.markerAuthor {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 // Light mode overrides
 [data-agentation-theme="light"] {
   .markerTooltip {
@@ -194,6 +219,10 @@
 
     .markerNote {
       color: rgba(0, 0, 0, 0.85);
+    }
+
+    .markerAuthor {
+      color: rgba(0, 0, 0, 0.45);
     }
   }
 }
